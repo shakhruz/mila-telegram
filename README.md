@@ -1,4 +1,4 @@
-# Telegram Plus
+# Mila Telegram
 
 Run your Claude Code session from Telegram — and keep it running.
 
@@ -41,8 +41,8 @@ Read this before you put it on a machine that matters.
 **2. Install the plugin.** From a Claude Code session:
 
 ```
-/plugin marketplace add <this-repo>
-/plugin install telegram-plus@<marketplace-name>
+/plugin marketplace add shakhruz/mila-telegram
+/plugin install mila-telegram@mila
 ```
 
 **3. Give the server the token.**
@@ -58,7 +58,7 @@ This writes `TELEGRAM_BOT_TOKEN=...` to `~/.claude/channels/telegram/.env`. You 
 **4. Relaunch with the channel flag.** The server won't connect without it:
 
 ```sh
-claude --channels plugin:telegram-plus@<marketplace-name>
+claude --channels plugin:mila-telegram@mila
 ```
 
 **5. Pair.** DM your bot; it replies with a 6-character code. In the session:
