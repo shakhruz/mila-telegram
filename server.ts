@@ -925,6 +925,24 @@ bot.command('channel_join', async ctx => {
   }
 })
 
+bot.command('whoami', async ctx => {
+  // Works everywhere, groups included, and deliberately without an access
+  // check: someone who finds themselves in a chat with a bot is entitled to
+  // know what they are talking to, whether or not they are on the allowlist.
+  // Model-provider policy requires disclosing that the counterpart is an AI;
+  // refusing to answer "who are you" would be exactly what that forbids.
+  const disclosure =
+    `I am an AI assistant, not a person.\n\n` +
+    `I run on Claude (Anthropic) and I am connected to the working session of ` +
+    `this chat's owner. I read this chat, reply, and carry out the tasks the ` +
+    `owner gives me.\n\n` +
+    `What I do not do: decide for people in medical, financial or legal ` +
+    `matters — there I prepare a draft and a human sends it.\n\n` +
+    `Questions or complaints go to the owner of this chat, who is responsible ` +
+    `for my work.`
+  await ctx.reply(disclosure).catch(() => {})
+})
+
 bot.command('start', async ctx => {
   if (!dmCommandGate(ctx)) return
   await ctx.reply(

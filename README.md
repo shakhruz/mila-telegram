@@ -14,6 +14,11 @@ This is an extended fork of the [official Telegram channel plugin](https://githu
 
 **Reply-quote context.** When someone replies to an earlier message, the quoted text travels with the new one, so the assistant answers about the message you actually pointed at instead of the last thing in the chat.
 
+**Disclosure by default.** `/whoami` answers, in any chat and to anyone, that
+they are talking to an AI, what it is connected to, and who is responsible for
+it. No access check on that one: a person who finds a bot in their group is
+entitled to know what it is, whether or not they are on the allowlist.
+
 Everything from the original plugin still works: pairing, allowlists, mention detection, `reply` / `react` / `edit_message`, photos, attachments, typing indicators.
 
 ## Security
