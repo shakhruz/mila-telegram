@@ -144,6 +144,47 @@ In groups with `requireMention: true`, any of the following triggers the bot:
 /telegram:access set mentionPatterns '["^hey claude\\b", "\\bassistant\\b"]'
 ```
 
+## Permission policy
+
+Every tool run costs a card in someone's Telegram. That works at five requests a
+day and collapses at fifty: the owner starts tapping Allow without reading,
+which is worse than no gate — it looks like control and is not.
+
+`permissions.json` in the state directory decides what can be decided:
+
+```jsonc
+{
+  "default": "ask",
+  "ttlSeconds": 900,        // unanswered card = refused, after this long
+  "stormMax": 25,           // cards per window before auto-deny
+  "stormWindowSeconds": 60,
+  "rules": [
+    // First match wins, so specific rules go above general ones.
+    { "tool": "Bash", "match": "re:rm\\s+-[rRf]{2,3}\\s+/(bin|etc|home|srv|usr|var)\\b",
+      "decision": "deny", "why": "root or a system directory — never" },
+    { "tool": "Bash", "match": "git push", "decision": "ask",
+      "why": "outward and irreversible" },
+    { "tool": "Read", "decision": "allow", "why": "reading files is harmless" },
+    { "tool": "Bash", "decision": "allow", "why": "the rest of the shell is routine" },
+    { "tool": "mcp__*", "decision": "ask", "why": "external services by hand" }
+  ]
+}
+```
+
+`match` is a substring by default; prefix `re:` for a regular expression.
+Substring matching is too blunt for the dangerous cases — `rm -rf /` as a
+substring also blocks `rm -rf /tmp/scratch`, and a rule that blocks routine work
+gets deleted by whoever is trying to work.
+
+Three outcomes, all recorded in `permission-log.jsonl`: **allow** runs silently
+but is logged, **deny** refuses without sending a card at all, **ask** sends one
+with a deadline — an unanswered card is a refusal, and the assistant is expected
+to say out loud that it did not do the thing.
+
+A malformed policy file turns everything into `ask`. Not into `allow`, because a
+syntax error must never open the door; not into `deny`, because that paralyses
+the assistant instead of asking you.
+
 ## Delivery
 
 Configure outbound behavior with `/telegram:access set <key> <value>`.

@@ -16,6 +16,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
+import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './permission_policy'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
@@ -532,6 +533,70 @@ mcp.setNotificationHandler(
     const { request_id, tool_name, description, input_preview } = params
     pendingPermissions.set(request_id, { tool_name, description, input_preview })
     const access = loadAccess()
+
+    // ─── Политика решает раньше человека ──────────────────────────────────
+    // Карточка на каждый вызов инструмента работает при пяти запросах в день
+    // и разваливается при пятидесяти: владелец начинает жать «разрешить» не
+    // читая, и это хуже отсутствия гейта — выглядит как контроль, но им не
+    // является. Поэтому то, что можно решить правилом, решается правилом.
+    const { policy, error: policyError } = loadPolicy(policyPath(STATE_DIR))
+    if (policyError) {
+      // Битый файл политики НЕ открывает дверь и НЕ парализует работу:
+      // деградируем к «спросить человека».
+      process.stderr.write(`permissions.json не разобран (${policyError}) — строгий режим\n`)
+    }
+    const verdict = decide(policy, tool_name, input_preview)
+
+    if (verdict.decision !== 'ask') {
+      logDecision(logPath(STATE_DIR), {
+        request_id, tool_name, decision: verdict.decision,
+        by: 'policy', reason: verdict.reason,
+        preview: String(input_preview).slice(0, 200),
+      })
+      void mcp.notification({
+        method: 'notifications/claude/channel/permission',
+        params: { request_id, behavior: verdict.decision },
+      })
+      // Разрешено правилом — молча, но в журнале. Запрещено правилом — тоже
+      // молча: будить человека ради того, что уже решено, незачем.
+      return
+    }
+
+    if (stormy(policy)) {
+      // Шторм: сорок карточек в минуту — это не решение, а затопление.
+      logDecision(logPath(STATE_DIR), {
+        request_id, tool_name, decision: 'deny', by: 'storm-cap',
+        reason: `более ${policy.stormMax} запросов за ${policy.stormWindowSeconds} с`,
+      })
+      void mcp.notification({
+        method: 'notifications/claude/channel/permission',
+        params: { request_id, behavior: 'deny' },
+      })
+      return
+    }
+
+    logDecision(logPath(STATE_DIR), {
+      request_id, tool_name, decision: 'ask', by: 'policy', reason: verdict.reason,
+      preview: String(input_preview).slice(0, 200),
+    })
+
+    // Срок жизни карточки. Молчание — это отказ, и агент обязан сказать
+    // вслух, что не сделал: «истекло» без объявления читается как «сделано».
+    if (policy.ttlSeconds > 0) {
+      setTimeout(() => {
+        if (!pendingPermissions.has(request_id)) return
+        pendingPermissions.delete(request_id)
+        logDecision(logPath(STATE_DIR), {
+          request_id, tool_name, decision: 'deny', by: 'ttl',
+          reason: `не отвечено за ${policy.ttlSeconds} с`,
+        })
+        void mcp.notification({
+          method: 'notifications/claude/channel/permission',
+          params: { request_id, behavior: 'deny' },
+        })
+      }, policy.ttlSeconds * 1000).unref?.()
+    }
+
     const text = `🔐 Permission: ${tool_name}`
     const keyboard = new InlineKeyboard()
       .text('See more', `perm:more:${request_id}`)
