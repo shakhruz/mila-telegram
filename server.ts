@@ -1340,6 +1340,13 @@ async function handleInbound(
       content: text,
       meta: {
         chat_id,
+        // Название чата — единственный способ отличить восемьдесят
+        // подключённых чатов друг от друга: реестр, собранный из одних
+        // числовых id, нечитаем, а Bot API не даёт списка чатов, чтобы
+        // достроить его потом. Кладём здесь, пока сообщение в руках.
+        ...(ctx.chat && 'title' in ctx.chat && ctx.chat.title
+            ? { chat_title: String(ctx.chat.title).slice(0, 128) } : {}),
+        ...(ctx.chat?.type ? { chat_type: ctx.chat.type } : {}),
         ...(msgId != null ? { message_id: String(msgId) } : {}),
         user: from.username ?? String(from.id),
         user_id: String(from.id),
