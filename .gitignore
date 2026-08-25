@@ -1,0 +1,17 @@
+node_modules/
+
+# Runtime state — never commit: contains the bot token, chat allowlist and message history
+.env
+access.json
+join-requests.json
+inbox/
+inbound/
+approved/
+failed/
+sent/
+*.pid
+*.log
+.in_use/
+
+# Local backups
+*.bak-*

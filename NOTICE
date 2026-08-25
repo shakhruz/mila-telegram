@@ -1,0 +1,31 @@
+Telegram Channel for Claude Code (extended fork)
+
+This product includes software developed by Anthropic:
+the "telegram" channel plugin from anthropics/claude-plugins-official,
+licensed under the Apache License, Version 2.0.
+
+  Copyright Anthropic, PBC
+  https://github.com/anthropics/claude-plugins-official
+
+Modifications and additions in this fork are
+Copyright 2026 Shakhruz Ashirov (AshotAI / MILAGPT)
+and are likewise licensed under the Apache License, Version 2.0.
+
+Summary of changes made to the original work:
+
+  - Group auto-join: a group can request access with a command; the owner
+    approves it with one tap in a private chat.
+  - Voice transcription hook: incoming voice notes can be transcribed by an
+    external command configured through an environment variable.
+  - Daemon mode and session bridge: the poller runs as a long-lived process
+    and writes events to a file; the session replays them, so a session
+    restart no longer costs incoming messages.
+  - Reply quotes: the message a user replied to is passed along, so the
+    assistant answers about the quoted text.
+  - Hardening: the bridge replays only an allowlist of methods, the event
+    journal and its directory are created with restrictive permissions, and
+    bot tokens are stripped from error output.
+
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0

@@ -1,0 +1,12 @@
+{
+  "name": "telegram-plus",
+  "description": "Telegram channel for Claude Code, extended: group auto-join with owner approval, voice transcription, a resilient daemon+bridge that survives session restarts, and reply-quote context. Fork of the official telegram channel plugin (Apache-2.0).",
+  "version": "1.0.0",
+  "keywords": [
+    "telegram",
+    "messaging",
+    "channel",
+    "mcp",
+    "remote-control"
+  ]
+}

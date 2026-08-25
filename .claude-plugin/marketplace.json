@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "telegram-plus",
+  "description": "Telegram channel for Claude Code, extended: group auto-join, voice transcription, restart-proof daemon, reply-quote context",
+  "owner": {
+    "name": "Shakhruz Ashirov"
+  },
+  "plugins": [
+    {
+      "name": "telegram-plus",
+      "source": "./",
+      "description": "Run your Claude Code session from Telegram — group chats with one-tap approval, voice notes, and a poller that survives session restarts. Fork of the official telegram channel plugin (Apache-2.0)."
+    }
+  ]
+}
