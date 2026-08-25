@@ -124,6 +124,9 @@ type GroupPolicy = {
 type Access = {
   dmPolicy: 'pairing' | 'allowlist' | 'disabled'
   allowFrom: string[]
+  // Who may DECIDE (approve tool permissions, connect groups), as opposed to
+  // who may talk. Empty = every allowFrom entry decides, as before.
+  owners: string[]
   groups: Record<string, GroupPolicy>
   pending: Record<string, PendingEntry>
   mentionPatterns?: string[]
@@ -142,6 +145,7 @@ function defaultAccess(): Access {
   return {
     dmPolicy: 'pairing',
     allowFrom: [],
+    owners: [],
     groups: {},
     pending: {},
   }
@@ -173,6 +177,7 @@ function readAccessFile(): Access {
     return {
       dmPolicy: parsed.dmPolicy ?? 'pairing',
       allowFrom: parsed.allowFrom ?? [],
+      owners: parsed.owners ?? [],
       groups: parsed.groups ?? {},
       pending: parsed.pending ?? {},
       mentionPatterns: parsed.mentionPatterns,
@@ -207,6 +212,19 @@ const BOOT_ACCESS: Access | null = STATIC
       return a
     })()
   : null
+
+// Who is allowed to DECIDE, as opposed to merely being allowed to talk. An
+// empty owners list keeps the previous behaviour: everyone on the DM allowlist
+// decides. The split matters as soon as the DM list holds more than one person
+// — a colleague who may message the assistant should not be able to approve a
+// tool run in someone else's session.
+function ownersOf(access: { owners?: string[]; allowFrom: string[] }): string[] {
+  return access.owners && access.owners.length ? access.owners : access.allowFrom
+}
+
+function isOwner(access: { owners?: string[]; allowFrom: string[] }, id: string): boolean {
+  return ownersOf(access).includes(id)
+}
 
 function loadAccess(): Access {
   return BOOT_ACCESS ?? readAccessFile()
@@ -519,7 +537,9 @@ mcp.setNotificationHandler(
       .text('See more', `perm:more:${request_id}`)
       .text('✅ Allow', `perm:allow:${request_id}`)
       .text('❌ Deny', `perm:deny:${request_id}`)
-    for (const chat_id of access.allowFrom) {
+    // A permission card is the right to run a tool in someone else's session.
+    // Only owners get one — not everyone who may send the bot a message.
+    for (const chat_id of ownersOf(access)) {
       void bot.api.sendMessage(chat_id, text, { reply_markup: keyboard }).catch(e => {
         process.stderr.write(`permission_request send to ${chat_id} failed: ${e}\n`)
       })
@@ -727,6 +747,45 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
   }
 })
 
+// ─── Secret masking: runs BEFORE anything reaches the journal ──────────────
+// The journal outlives the session and sits on disk for months. A key someone
+// pastes into a chat ("here, hook this up") would otherwise stay there forever
+// and leak with any copy of the directory. So the value is cut on the way in,
+// while the fact of it is kept: the assistant should be able to say "a key
+// arrived, I did not store it — put it in an environment variable" rather than
+// pretend nothing happened.
+const SECRET_PATTERNS: Array<[RegExp, string]> = [
+  [/\bsk-(?:ant|proj|or|live|test)?-?[A-Za-z0-9_\-]{16,}/g, 'api-key'],
+  [/\bghp_[A-Za-z0-9]{20,}/g, 'github-token'],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, 'github-pat'],
+  [/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, 'slack-token'],
+  [/\bAKIA[0-9A-Z]{16}\b/g, 'aws-key'],
+  [/\bAIza[0-9A-Za-z_\-]{30,}/g, 'google-key'],
+  [/\b\d{8,10}:AA[A-Za-z0-9_\-]{30,}/g, 'telegram-bot-token'],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, 'private-key'],
+  [/\bhf_[A-Za-z0-9]{20,}/g, 'hf-token'],
+]
+
+function maskSecrets(value: any, found: string[]): any {
+  if (typeof value === 'string') {
+    let out = value
+    for (const [re, kind] of SECRET_PATTERNS) {
+      out = out.replace(re, () => {
+        if (!found.includes(kind)) found.push(kind)
+        return '<' + kind + ' masked by the receiver, not written to the journal>'
+      })
+    }
+    return out
+  }
+  if (Array.isArray(value)) return value.map(v => maskSecrets(v, found))
+  if (value && typeof value === 'object') {
+    const out: any = {}
+    for (const k of Object.keys(value)) out[k] = maskSecrets(value[k], found)
+    return out
+  }
+  return value
+}
+
 if (IS_DAEMON) {
   // Daemon: do NOT connect the stdio MCP transport. Every notification goes to
   // events.jsonl — a thin adapter inside the session reads the journal and
@@ -736,7 +795,16 @@ if (IS_DAEMON) {
   // Telegram's voice. So the directory and the journal stay owner-only.
   mkdirSync(INBOUND_DIR, { recursive: true, mode: 0o700 })
   ;(mcp as any).notification = async (msg: any) => {
-    const line = JSON.stringify({ ts: Date.now(), ...msg })
+    const found: string[] = []
+    const safe = maskSecrets(msg, found)
+    if (found.length) {
+      safe.params = safe.params || {}
+      safe.params.meta = safe.params.meta || {}
+      safe.params.meta.secrets_masked = found
+      process.stderr.write('telegram receiver: masked secrets in inbound: ' +
+        found.join(', ') + '\n')
+    }
+    const line = JSON.stringify({ ts: Date.now(), ...safe })
     appendFileSync(EVENTS_FILE, line + '\n', { mode: 0o600 })
   }
   process.stderr.write('telegram receiver: daemon mode, events -> ' + EVENTS_FILE + '\n')
@@ -856,7 +924,7 @@ bot.command('channel_join', async ctx => {
     const access = loadAccess()
     // id gate: only an owner (DM allowlist) can initiate. Everyone else gets
     // silence — don't confirm the bot's presence in unconnected groups.
-    if (!access.allowFrom.includes(senderId)) return
+    if (!isOwner(access, senderId)) return
     if (STATIC) {
       await ctx.reply('Static mode — the allowlist only changes by editing access.json on the host.').catch(() => {})
       return
@@ -897,7 +965,7 @@ bot.command('channel_join', async ctx => {
       .text('👁 Listen only', `join:read:${code}`)
       .text('❌ Reject', `join:deny:${code}`)
     let delivered = 0
-    for (const owner of access.allowFrom) {
+    for (const owner of ownersOf(access)) {
       try {
         await bot.api.sendMessage(
           owner,
@@ -984,7 +1052,7 @@ bot.on('callback_query:data', async ctx => {
     }
     const aAccess = loadAccess()
     const aSender = String(ctx.from.id)
-    if (!aAccess.allowFrom.includes(aSender)) {
+    if (!isOwner(aAccess, aSender)) {
       await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
       return
     }
@@ -1047,7 +1115,7 @@ bot.on('callback_query:data', async ctx => {
   }
   const access = loadAccess()
   const senderId = String(ctx.from.id)
-  if (!access.allowFrom.includes(senderId)) {
+  if (!isOwner(access, senderId)) {
     await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
     return
   }
@@ -1292,6 +1360,15 @@ async function handleInbound(
   // (non-allowlisted senders were dropped above), so we trust the reply.
   const permMatch = PERMISSION_REPLY_RE.exec(text)
   if (permMatch) {
+    // A plain "yes <code>" grants a tool run — the same right as the button on
+    // the card, minus the button. It used to be accepted from any approved
+    // sender, which means from any connected group: seeing the code in the
+    // chat was enough. Owner DMs only; elsewhere it travels on as normal text.
+    const pAccess = loadAccess()
+    if (ctx.chat!.type !== 'private' || !isOwner(pAccess, String(from.id))) {
+      process.stderr.write('telegram: permission reply ignored — not an owner DM\\n')
+      return
+    }
     void mcp.notification({
       method: 'notifications/claude/channel/permission',
       params: {

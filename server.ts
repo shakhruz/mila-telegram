@@ -120,6 +120,9 @@ type GroupPolicy = {
 type Access = {
   dmPolicy: 'pairing' | 'allowlist' | 'disabled'
   allowFrom: string[]
+  // Who may DECIDE (approve tool permissions, connect groups), as opposed to
+  // who may talk. Empty = every allowFrom entry decides, as before.
+  owners: string[]
   groups: Record<string, GroupPolicy>
   pending: Record<string, PendingEntry>
   mentionPatterns?: string[]
@@ -138,6 +141,7 @@ function defaultAccess(): Access {
   return {
     dmPolicy: 'pairing',
     allowFrom: [],
+    owners: [],
     groups: {},
     pending: {},
   }
@@ -169,6 +173,7 @@ function readAccessFile(): Access {
     return {
       dmPolicy: parsed.dmPolicy ?? 'pairing',
       allowFrom: parsed.allowFrom ?? [],
+      owners: parsed.owners ?? [],
       groups: parsed.groups ?? {},
       pending: parsed.pending ?? {},
       mentionPatterns: parsed.mentionPatterns,
@@ -203,6 +208,19 @@ const BOOT_ACCESS: Access | null = STATIC
       return a
     })()
   : null
+
+// Who is allowed to DECIDE, as opposed to merely being allowed to talk. An
+// empty owners list keeps the previous behaviour: everyone on the DM allowlist
+// decides. The split matters as soon as the DM list holds more than one person
+// — a colleague who may message the assistant should not be able to approve a
+// tool run in someone else's session.
+function ownersOf(access: { owners?: string[]; allowFrom: string[] }): string[] {
+  return access.owners && access.owners.length ? access.owners : access.allowFrom
+}
+
+function isOwner(access: { owners?: string[]; allowFrom: string[] }, id: string): boolean {
+  return ownersOf(access).includes(id)
+}
 
 function loadAccess(): Access {
   return BOOT_ACCESS ?? readAccessFile()
@@ -515,7 +533,9 @@ mcp.setNotificationHandler(
       .text('See more', `perm:more:${request_id}`)
       .text('✅ Allow', `perm:allow:${request_id}`)
       .text('❌ Deny', `perm:deny:${request_id}`)
-    for (const chat_id of access.allowFrom) {
+    // A permission card is the right to run a tool in someone else's session.
+    // Only owners get one — not everyone who may send the bot a message.
+    for (const chat_id of ownersOf(access)) {
       void bot.api.sendMessage(chat_id, text, { reply_markup: keyboard }).catch(e => {
         process.stderr.write(`permission_request send to ${chat_id} failed: ${e}\n`)
       })
@@ -835,7 +855,7 @@ bot.command('channel_join', async ctx => {
     const access = loadAccess()
     // id gate: only an owner (DM allowlist) can initiate. Everyone else gets
     // silence — don't confirm the bot's presence in unconnected groups.
-    if (!access.allowFrom.includes(senderId)) return
+    if (!isOwner(access, senderId)) return
     if (STATIC) {
       await ctx.reply('Static mode — the allowlist only changes by editing access.json on the host.').catch(() => {})
       return
@@ -876,7 +896,7 @@ bot.command('channel_join', async ctx => {
       .text('👁 Listen only', `join:read:${code}`)
       .text('❌ Reject', `join:deny:${code}`)
     let delivered = 0
-    for (const owner of access.allowFrom) {
+    for (const owner of ownersOf(access)) {
       try {
         await bot.api.sendMessage(
           owner,
@@ -963,7 +983,7 @@ bot.on('callback_query:data', async ctx => {
     }
     const aAccess = loadAccess()
     const aSender = String(ctx.from.id)
-    if (!aAccess.allowFrom.includes(aSender)) {
+    if (!isOwner(aAccess, aSender)) {
       await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
       return
     }
@@ -1026,7 +1046,7 @@ bot.on('callback_query:data', async ctx => {
   }
   const access = loadAccess()
   const senderId = String(ctx.from.id)
-  if (!access.allowFrom.includes(senderId)) {
+  if (!isOwner(access, senderId)) {
     await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
     return
   }
@@ -1271,6 +1291,15 @@ async function handleInbound(
   // (non-allowlisted senders were dropped above), so we trust the reply.
   const permMatch = PERMISSION_REPLY_RE.exec(text)
   if (permMatch) {
+    // A plain "yes <code>" grants a tool run — the same right as the button on
+    // the card, minus the button. It used to be accepted from any approved
+    // sender, which means from any connected group: seeing the code in the
+    // chat was enough. Owner DMs only; elsewhere it travels on as normal text.
+    const pAccess = loadAccess()
+    if (ctx.chat!.type !== 'private' || !isOwner(pAccess, String(from.id))) {
+      process.stderr.write('telegram: permission reply ignored — not an owner DM\\n')
+      return
+    }
     void mcp.notification({
       method: 'notifications/claude/channel/permission',
       params: {

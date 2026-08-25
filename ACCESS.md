@@ -16,6 +16,40 @@ All state lives in `~/.claude/channels/telegram/access.json`. The `/telegram:acc
 | `ackReaction` quirk | Fixed whitelist only; non-whitelisted emoji silently do nothing |
 | Config file | `~/.claude/channels/telegram/access.json` |
 
+## Owners: who may decide
+
+`allowFrom` says who may *talk* to the assistant. `owners` says who may *decide*:
+approve a tool permission, connect a group, accept a pairing. Leave `owners`
+empty and every entry in `allowFrom` decides — the original behaviour, correct
+for a single-user setup.
+
+The moment a second person is on the DM allowlist, set it. A colleague who
+should be able to message the assistant has no business approving a tool run in
+your session, and a permission card that lands in their chat is exactly that.
+
+```jsonc
+{
+  "allowFrom": ["412587349", "628194073"],  // both may write
+  "owners":    ["412587349"]                // only this one decides
+}
+```
+
+Text approvals follow the same rule and are stricter about where they come
+from: `yes <code>` is only honoured in an owner's private chat. It used to be
+accepted from any approved sender — which included every connected group, where
+seeing the code in the conversation was enough to grant a tool run.
+
+## Secrets never reach the journal
+
+The daemon masks credentials in inbound messages *before* appending them to
+`events.jsonl`: API keys, GitHub and Slack tokens, AWS and Google keys, bot
+tokens, PEM private keys. The value is replaced, the fact is kept in
+`meta.secrets_masked`, so the assistant can tell the sender their key arrived
+and was not stored — instead of silently keeping it on disk for months.
+
+Masking is a backstop, not a workflow. Anyone pasting a live credential into a
+chat should still rotate it.
+
 ## DM policies
 
 `dmPolicy` controls how DMs from senders not on the allowlist are handled.
