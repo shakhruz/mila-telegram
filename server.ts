@@ -925,6 +925,56 @@ bot.command('channel_join', async ctx => {
   }
 })
 
+bot.command('mila_leave', async ctx => {
+  // Disconnecting a chat. Connecting took one tap; disconnecting used to mean
+  // editing JSON by hand. That asymmetry is a hazard: what is hard to turn off
+  // stays on longer than it should.
+  //
+  // Who may: the owner anywhere, and in a group also its admins. A person who
+  // runs a chat is entitled to close their own door. Opening one still
+  // requires the bot owner.
+  const from = ctx.from
+  const chat = ctx.chat
+  if (!from || !chat) return
+  const chatId = String(chat.id)
+  const senderId = String(from.id)
+  const access = loadAccess()
+
+  let allowed = isOwner(access, senderId)
+  if (!allowed && chat.type !== 'private') {
+    try {
+      const m = await ctx.api.getChatMember(chatId, from.id)
+      allowed = m.status === 'creator' || m.status === 'administrator'
+    } catch { allowed = false }
+  }
+  // Silence for everyone else, same as /mila_join: do not advertise the bot's
+  // presence, and do not let anyone probe connection state by trying commands.
+  if (!allowed) return
+
+  if (!access.groups[chatId]) {
+    await ctx.reply('This chat is not connected.').catch(() => {})
+    return
+  }
+
+  delete access.groups[chatId]
+  saveAccess(access)
+  logAuth({
+    chat_id: chatId,
+    title: ('title' in chat && chat.title) || '',
+    action: 'leave',
+    by: senderId,
+    by_name: from.username ? `@${from.username}` : senderId,
+    via: 'mila_leave',
+  })
+  regenChatsIndex()
+
+  await ctx.reply(
+    'Disconnected. I no longer read this chat or reply in it.\n\n' +
+    'The chat card and the authorization-log entry are kept — history is not ' +
+    'erased. The bot owner can reconnect with /mila_join.'
+  ).catch(() => {})
+})
+
 bot.command('whoami', async ctx => {
   // Works everywhere, groups included, and deliberately without an access
   // check: someone who finds themselves in a chat with a bot is entitled to

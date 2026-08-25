@@ -102,6 +102,20 @@ The bot sends the owner a four-button card in their private chat asking how the 
 | 👁 Listen only | `readOnly: true` — the bot hears the chat and forwards messages to the session, but replies into that chat are blocked mechanically: `reply` / `react` / `edit_message` refuse the chat_id. The chat gets no announcement — a silent presence. |
 | ❌ Reject | Drops the request. |
 
+### Disconnecting
+
+```
+/mila_leave
+```
+
+Sent in the group. The owner can do it anywhere; in a group, so can its
+admins — whoever runs a chat may close their own door. Opening one still
+requires the bot owner.
+
+The chat card and the authorization-log entry survive: disconnecting is not
+erasure, and a chat that was connected for three months should still be able to
+say so afterwards.
+
 The group itself can never grant access — the approval only happens in the owner's private chat, and only the owner's tap counts. A request expires if it isn't approved. Sending `/channel_join` again and tapping a different button overwrites the stored mode — that's how you change it later.
 
 Every decision, rejections included, is appended to `auth-log.jsonl` in the state directory: timestamp, chat, who brought it, the decision, who decided. Each connected chat also gets a context card at `chats/<id>.md` — the mechanics write the skeleton (title, mode, date), the assistant maintains the content — and `CHATS.md` is regenerated from `access.json` as an index of all connected chats.
