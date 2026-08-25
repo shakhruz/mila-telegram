@@ -8,7 +8,7 @@ This is an extended fork of the [official Telegram channel plugin](https://githu
 
 **A daemon that outlives the session.** In the original, the Telegram poller lives inside the session process: restart Claude Code and every message sent in the meantime is gone. Here the poller runs as a long-lived daemon that appends events to a journal file, and the session replays them from a cursor on startup. Restart, crash, upgrade — incoming messages wait in the file and arrive when the session comes back.
 
-**Group auto-join with one-tap approval.** Add the bot to a group and send `/channel_join`. The owner gets an inline button in a private chat; one tap puts the group on the allowlist. No numeric chat IDs, no editing JSON by hand. Group messages can never change the allowlist themselves — approval only happens in the owner's private chat.
+**Group auto-join with one-tap approval.** Add the bot to a group and send `/channel_join`. The owner gets a four-button card in a private chat: reply to everyone, mention-only, listen-only (the bot hears the chat, but replies into it are blocked mechanically), or reject. Every decision — rejections included — is appended to an `auth-log.jsonl` journal, and each connected chat gets a context card in `chats/<id>.md` plus a generated `CHATS.md` registry. No numeric chat IDs, no editing JSON by hand; group messages can never change the allowlist themselves — approval only happens in the owner's private chat.
 
 **Voice transcription.** Voice notes are handed to a transcription command of your choice (set `TELEGRAM_VOICE_TRANSCRIBE_CMD`), and the text reaches the assistant along with the audio. Unset means voice notes simply pass through untranscribed — no default, no vendor.
 

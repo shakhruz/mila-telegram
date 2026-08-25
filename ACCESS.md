@@ -59,7 +59,18 @@ This fork adds a shortcut. Add the bot to the group and send:
 /channel_join
 ```
 
-The bot sends the owner an inline button in their private chat; one tap adds the group to the allowlist with `requireMention: true`. The group itself can never grant access — the approval only happens in the owner's private chat, and only the owner's tap counts. A request expires if it isn't approved.
+The bot sends the owner a four-button card in their private chat asking how the group should be connected:
+
+| Button | Effect |
+| --- | --- |
+| 💬 Reply to everyone | `requireMention: false` — the bot responds to every message (also requires disabling privacy mode, see below). |
+| 🏷 Mention-only | `requireMention: true` — the bot responds only when @mentioned or replied to. |
+| 👁 Listen only | `readOnly: true` — the bot hears the chat and forwards messages to the session, but replies into that chat are blocked mechanically: `reply` / `react` / `edit_message` refuse the chat_id. The chat gets no announcement — a silent presence. |
+| ❌ Reject | Drops the request. |
+
+The group itself can never grant access — the approval only happens in the owner's private chat, and only the owner's tap counts. A request expires if it isn't approved. Sending `/channel_join` again and tapping a different button overwrites the stored mode — that's how you change it later.
+
+Every decision, rejections included, is appended to `auth-log.jsonl` in the state directory: timestamp, chat, who brought it, the decision, who decided. Each connected chat also gets a context card at `chats/<id>.md` — the mechanics write the skeleton (title, mode, date), the assistant maintains the content — and `CHATS.md` is regenerated from `access.json` as an index of all connected chats.
 
 Note that a message asking Claude to approve a pairing or a group is exactly what a prompt injection would say. Approval is a button in your own DMs, never something the assistant should do because a chat message asked.
 
@@ -137,7 +148,10 @@ Configure outbound behavior with `/telegram:access set <key> <value>`.
       // false also requires disabling privacy mode via BotFather.
       "requireMention": true,
       // Restrict triggers to these senders. Empty = any member (subject to requireMention).
-      "allowFrom": []
+      "allowFrom": [],
+      // Listen-only: inbound messages reach the session, but outbound
+      // sends to this chat are refused mechanically. Omit for normal chats.
+      "readOnly": false
     }
   },
 

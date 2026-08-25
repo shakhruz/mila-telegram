@@ -19,7 +19,7 @@ import { z } from 'zod'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { execFileSync } from 'child_process'
 import { join, extname, sep } from 'path'
@@ -113,6 +113,8 @@ type PendingEntry = {
 type GroupPolicy = {
   requireMention: boolean
   allowFrom: string[]
+  /** Listen-only mode: messages reach the session, outbound sends to the chat are blocked. */
+  readOnly?: boolean
 }
 
 type Access = {
@@ -206,12 +208,75 @@ function loadAccess(): Access {
   return BOOT_ACCESS ?? readAccessFile()
 }
 
+// ─── Authorization log and chat registry ───
+const AUTH_LOG = join(STATE_DIR, 'auth-log.jsonl')
+const CHATS_DIR = join(STATE_DIR, 'chats')
+const MODE_LABEL: Record<string, string> = {
+  all: '💬 reply to everyone',
+  mention: '🏷 mention-only',
+  read: '👁 listen only',
+  deny: '❌ rejected',
+}
+
+// Every authorization is one appended line, kept forever: date, chat, who
+// brought it, the decision, and who decided.
+function logAuth(entry: Record<string, unknown>): void {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+    appendFileSync(AUTH_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: 0o600 })
+  } catch {}
+}
+
+// Chat card: the mechanics create the skeleton (title, mode, date); the content
+// (purpose, people, summary) is the assistant's to maintain — its context for replies.
+function chatCard(chatId: string, title: string, mode: string, requestedByName: string): void {
+  try {
+    mkdirSync(CHATS_DIR, { recursive: true, mode: 0o700 })
+    const p = join(CHATS_DIR, `${chatId}.md`)
+    let txt = ''
+    try { txt = readFileSync(p, 'utf8') } catch {}
+    if (!txt) {
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      txt = `# ${title || chatId}\n\nchat_id: ${chatId}\nmode: ${MODE_LABEL[mode] ?? mode}\nconnected: ${stamp} UTC · brought by ${requestedByName}\n\n## Purpose\n(maintained by the assistant)\n\n## People\n(maintained by the assistant)\n\n## Summary\n(maintained by the assistant)\n`
+    } else {
+      // Re-authorization only updates the mode line — the card content stays.
+      txt = txt.replace(/^mode: .*$/m, `mode: ${MODE_LABEL[mode] ?? mode}`)
+    }
+    writeFileSync(p, txt, { mode: 0o600 })
+  } catch {}
+  regenChatsIndex()
+}
+
+// The CHATS.md index is generated from access.json — a registry, not a manuscript.
+function regenChatsIndex(): void {
+  try {
+    const a = loadAccess()
+    const lines = ['# Connected chats', '',
+      '> Regenerated mechanically on every authorization. Cards: chats/<id>.md', '']
+    for (const [id, g] of Object.entries(a.groups)) {
+      let name = id
+      try {
+        const m = /^# (.+)$/m.exec(readFileSync(join(CHATS_DIR, `${id}.md`), 'utf8'))
+        if (m) name = m[1]!
+      } catch {}
+      const mode = g.readOnly ? MODE_LABEL.read : (g.requireMention ? MODE_LABEL.mention : MODE_LABEL.all)
+      lines.push(`- ${name} · \`${id}\` · ${mode}`)
+    }
+    writeFileSync(join(STATE_DIR, 'CHATS.md'), lines.join('\n') + '\n', { mode: 0o600 })
+  } catch {}
+}
+
 // Outbound gate — reply/react/edit can only target chats the inbound gate
 // would deliver from. Telegram DM chat_id == user_id, so allowFrom covers DMs.
 function assertAllowedChat(chat_id: string): void {
   const access = loadAccess()
   if (access.allowFrom.includes(chat_id)) return
-  if (chat_id in access.groups) return
+  if (chat_id in access.groups) {
+    if (access.groups[chat_id]?.readOnly) {
+      throw new Error(`chat ${chat_id} is read-only — the owner connected it in listen-only mode`)
+    }
+    return
+  }
   throw new Error(`chat ${chat_id} is not allowlisted — add via /telegram:access`)
 }
 
@@ -704,7 +769,9 @@ setInterval(() => {
 //     in the group.
 //  2. The server does NOT promote the group — it files a request in
 //     join-requests.json and sends inline buttons to the owner(s) in DM.
-//  3. The owner's tap in DM adds the group to access.groups.
+//  3. The owner's tap in DM picks a connection mode (reply-all / mention-only /
+//     listen-only) and adds the group to access.groups; every decision is
+//     appended to auth-log.jsonl and reflected in the chats/ registry.
 // Security invariants:
 //  - a group message on its own NEVER modifies access.json;
 //  - the trigger is accepted only from allowFrom (id gate — from.id cannot be
@@ -803,7 +870,10 @@ bot.command('channel_join', async ctx => {
     }
     saveJoins(joins)
     const kb = new InlineKeyboard()
-      .text('✅ Connect', `join:allow:${code}`)
+      .text('💬 Reply to everyone', `join:all:${code}`)
+      .text('🏷 Mention-only', `join:mention:${code}`)
+      .row()
+      .text('👁 Listen only', `join:read:${code}`)
       .text('❌ Reject', `join:deny:${code}`)
     let delivered = 0
     for (const owner of access.allowFrom) {
@@ -814,7 +884,7 @@ bot.command('channel_join', async ctx => {
           `"${title || 'untitled'}"\n` +
           `chat_id: ${chatId}\n` +
           `requested by: ${joins[code].requestedByName} (${senderId})\n\n` +
-          `Add to the allowlist (requireMention: true)?\n` +
+          `How should it be connected?\n` +
           `The request expires in 1 hour. [${code}]`,
           { reply_markup: kb },
         )
@@ -884,7 +954,7 @@ bot.command('status', async ctx => {
 // Security mirrors the text-reply path: allowFrom must contain the sender.
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
-  const am = /^join(?:auto)?:(allow|deny):([0-9a-f]{8})$/.exec(data)
+  const am = /^join(?:auto)?:(allow|deny|all|mention|read):([0-9a-f]{8})$/.exec(data)
   if (am) {
     // These buttons only live in the owner's private chat — double gate.
     if (ctx.chat?.type !== 'private') {
@@ -911,21 +981,35 @@ bot.on('callback_query:data', async ctx => {
     }
     delete joins[aCode!]
     saveJoins(joins)
-    if (aAct === 'allow') {
-      // read-modify-write immediately before the write.
+    if (aAct !== 'deny') {
+      // Mode comes from the button; legacy 'allow' (old cards) maps to the safe
+      // mention-only.
+      const mode = aAct === 'all' ? 'all' : aAct === 'read' ? 'read' : 'mention'
+      // read-modify-write immediately before the write. A repeat authorization
+      // deliberately OVERWRITES the mode — that is how the owner changes it,
+      // with another /channel_join.
       const aAcc2 = loadAccess()
-      if (!aAcc2.groups[aReq.chatId]) {
-        // Mention-only by default: without it every member's message goes
-        // straight into the session. Loosen deliberately via /telegram:access.
-        aAcc2.groups[aReq.chatId] = { requireMention: true, allowFrom: [] }
-        saveAccess(aAcc2)
+      aAcc2.groups[aReq.chatId] = {
+        requireMention: mode === 'mention',
+        allowFrom: aAcc2.groups[aReq.chatId]?.allowFrom ?? [],
+        ...(mode === 'read' ? { readOnly: true } : {}),
       }
-      await ctx.answerCallbackQuery({ text: '✅ Channel active' }).catch(() => {})
+      saveAccess(aAcc2)
+      logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
+                action: mode, by: aSender, via: data.startsWith('joinauto') ? 'auto-card' : 'join-command' })
+      chatCard(aReq.chatId, aReq.title, mode, aReq.requestedByName)
+      const label = MODE_LABEL[mode]!
+      await ctx.answerCallbackQuery({ text: `✅ ${label}` }).catch(() => {})
       if (aMsg && 'text' in aMsg && aMsg.text) {
-        await ctx.editMessageText(`${aMsg.text}\n\n✅ Connected (requireMention: true)`).catch(() => {})
+        await ctx.editMessageText(`${aMsg.text}\n\n✅ Connected: ${label}`).catch(() => {})
       }
-      await bot.api.sendMessage(aReq.chatId, '🟢 Channel is active in this chat.').catch(() => {})
+      // Listen-only is a silent presence: the chat is not notified.
+      if (mode !== 'read') {
+        await bot.api.sendMessage(aReq.chatId, '🟢 Channel is active in this chat.').catch(() => {})
+      }
     } else {
+      logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
+                action: 'deny', by: aSender, via: data.startsWith('joinauto') ? 'auto-card' : 'join-command' })
       await ctx.answerCallbackQuery({ text: '❌ Rejected' }).catch(() => {})
       if (aMsg && 'text' in aMsg && aMsg.text) {
         await ctx.editMessageText(`${aMsg.text}\n\n❌ Rejected`).catch(() => {})
@@ -1274,8 +1358,8 @@ bot.catch(err => {
 //  1. The bot is added to a group/supergroup.
 //  2. If the chat is not in access.groups and has no live request, the server
 //     files one in join-requests.json (same format as /channel_join) and sends
-//     the owner(s) [✅ Enable here] / [❌ No] buttons in DM (callback joinauto:*).
-//  3. The owner's tap in DM connects the chat.
+//     the owner(s) a four-button mode card in DM (callback joinauto:*).
+//  3. The owner's tap in DM connects the chat in the chosen mode.
 // Security invariants (same as the /channel_join path):
 //  - being added authorizes NOTHING; access.json changes only on the owner's tap
 //    in a private chat (private + allowFrom);
@@ -1332,8 +1416,11 @@ bot.on('my_chat_member', async ctx => {
     }
     saveJoins(joins)
     const kb = new InlineKeyboard()
-      .text('✅ Enable here', `joinauto:allow:${code}`)
-      .text('❌ No', `joinauto:deny:${code}`)
+      .text('💬 Reply to everyone', `joinauto:all:${code}`)
+      .text('🏷 Mention-only', `joinauto:mention:${code}`)
+      .row()
+      .text('👁 Listen only', `joinauto:read:${code}`)
+      .text('❌ Reject', `joinauto:deny:${code}`)
     let delivered = 0
     for (const owner of access.allowFrom) {
       try {
@@ -1343,7 +1430,7 @@ bot.on('my_chat_member', async ctx => {
           `"${title || 'untitled'}" (${chatType})\n` +
           `chat_id: ${chatId}\n` +
           `added by: ${actorName} (${actorId})\n\n` +
-          `Enable the channel here (requireMention: true)?\n` +
+          `How should it be connected?\n` +
           `The request expires in 1 hour. [${code}]`,
           { reply_markup: kb },
         )
