@@ -820,7 +820,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 // arrived, I did not store it — put it in an environment variable" rather than
 // pretend nothing happened.
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/\bsk-(?:ant|proj|or|live|test)?-?[A-Za-z0-9_\-]{16,}/g, 'api-key'],
+  // sk_ и sk- одинаково распространены: OpenAI/Anthropic пишут через дефис,
+  // Zernio и другие — через подчёркивание. Первая версия требовала дефиса и
+  // пропустила настоящий ключ клиента прямо в журнал. Разделитель необязателен
+  // и любой из двух.
+  [/\bsk[-_][A-Za-z0-9][A-Za-z0-9_-]{18,}/g, 'api-key'],
+  [/\b(?:pk|rk|tok|key)[-_][A-Za-z0-9][A-Za-z0-9_-]{22,}/g, 'api-key'],
   [/\bghp_[A-Za-z0-9]{20,}/g, 'github-token'],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, 'github-pat'],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, 'slack-token'],
@@ -1606,15 +1611,61 @@ bot.catch(err => {
 //  - dedup: already allowlisted OR a request already pending → return silently;
 //  - static mode and the request cap (JOIN_MAX_PENDING) are honored;
 //  - the handler never throws — message delivery must not break.
-// Delivery note: my_chat_member is part of Telegram's default allowed_updates
-// (only chat_member and message_reaction* are excluded by default) and bot.start()
-// is called here without allowed_updates, so the event arrives as is.
+// Delivery note: my_chat_member is part of the explicit allowed_updates in
+// bot.start() below (together with message_reaction, which Telegram excludes
+// by default and must be requested).
 
 function botIsMember(status: string | undefined, isMember?: boolean): boolean {
   if (status === 'creator' || status === 'administrator' || status === 'member') return true
   if (status === 'restricted') return isMember === true
   return false // left | kicked | undefined
 }
+
+// ─── Emoji reactions from private chats (message_reaction) ───
+// Telegram does not deliver reaction updates by default — they are requested
+// explicitly via allowed_updates in bot.start() below. Reactions from private
+// chats reach the session as events tied to a message_id, so the agent knows
+// exactly which message resonated. Group reactions are intentionally ignored
+// (noise). This closes an asymmetry: the bot could always SEND reactions
+// (react tool), but never saw the user's own.
+bot.on('message_reaction', async ctx => {
+  try {
+    const upd = ctx.messageReaction
+    if (!upd || ctx.chat?.type !== 'private') return
+    const emj = (r: { type: string; emoji?: string; custom_emoji_id?: string }) =>
+      r.type === 'emoji' ? (r.emoji ?? '') : (r.type === 'paid' ? '\u2b50' : '\u25c6')
+    const oldSet = new Set((upd.old_reaction ?? []).map(emj))
+    const newSet = new Set((upd.new_reaction ?? []).map(emj))
+    const added = [...newSet].filter(e => e && !oldSet.has(e))
+    const removed = [...oldSet].filter(e => e && !newSet.has(e))
+    if (added.length === 0 && removed.length === 0) return
+    const userName = upd.user?.username ?? upd.user?.first_name ?? 'unknown'
+    const userId = upd.user?.id != null ? String(upd.user.id) : ''
+    const parts: string[] = []
+    if (added.length) parts.push(`[reaction] ${added.join(' ')}`)
+    if (removed.length) parts.push(`[reaction removed] ${removed.join(' ')}`)
+    void mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: parts.join(' \u00b7 '),
+        meta: {
+          type: 'reaction',
+          chat_id: String(upd.chat.id),
+          message_id: String(upd.message_id),
+          user: userName,
+          ...(userId ? { user_id: userId } : {}),
+          ...(added.length ? { added: added.join(' ') } : {}),
+          ...(removed.length ? { removed: removed.join(' ') } : {}),
+          ts: new Date().toISOString(),
+        },
+      },
+    }).catch(err => {
+      process.stderr.write(`reaction: failed to deliver event: ${scrubToken(err)}\n`)
+    })
+  } catch (err) {
+    process.stderr.write(`reaction: handler error: ${scrubToken(err)}\n`)
+  }
+})
 
 bot.on('my_chat_member', async ctx => {
   try {
@@ -1691,6 +1742,9 @@ void (async () => {
   for (let attempt = 1; ; attempt++) {
     try {
       await bot.start({
+        // message_reaction is excluded from Telegram's defaults — ask for it
+        // explicitly; the rest is what the handlers above actually consume.
+        allowed_updates: ['message', 'callback_query', 'my_chat_member', 'message_reaction'],
         onStart: info => {
           attempt = 0
           botUsername = info.username
