@@ -1214,11 +1214,21 @@ bot.on('callback_query:data', async ctx => {
     const aReq = joins[aCode!]
     const aMsg = ctx.callbackQuery.message
     if (!aReq) {
-      await ctx.answerCallbackQuery({ text: 'Request expired or already handled.' }).catch(() => {})
+      await ctx.answerCallbackQuery({ text: 'Already decided by another owner or expired.' }).catch(() => {})
       if (aMsg && 'text' in aMsg && aMsg.text) {
-        await ctx.editMessageText(`${aMsg.text}\n\n⌛️ Request expired / already handled.`).catch(() => {})
+        await ctx.editMessageText(`${aMsg.text}\n\n⌛️ Already decided by another owner, or the request expired.`).catch(() => {})
       }
       return
+    }
+    // Co-owners: the card went to every owner, so whichever one taps first
+    // decides — the others get a notification, not a second live card (the
+    // request is already deleted below, so a later tap hits the branch above).
+    const aWho = ctx.from.first_name || (ctx.from.username ? `@${ctx.from.username}` : aSender)
+    const tellOthers = async (line: string) => {
+      for (const o of ownersOf(aAccess)) {
+        if (o === aSender) continue
+        await bot.api.sendMessage(o, line).catch(() => {})
+      }
     }
     delete joins[aCode!]
     saveJoins(joins)
@@ -1245,6 +1255,7 @@ bot.on('callback_query:data', async ctx => {
       if (aMsg && 'text' in aMsg && aMsg.text) {
         await ctx.editMessageText(`${aMsg.text}\n\n✅ Connected: ${label}`).catch(() => {})
       }
+      await tellOthers(`✅ ${aWho} connected the bot to "${aReq.title || aReq.chatId}" — mode: ${label}.`)
       // Listen-only is a silent presence: the chat is not notified.
       if (mode !== 'read') {
         await bot.api.sendMessage(aReq.chatId, '🟢 Channel is active in this chat.').catch(() => {})
@@ -1256,6 +1267,7 @@ bot.on('callback_query:data', async ctx => {
       if (aMsg && 'text' in aMsg && aMsg.text) {
         await ctx.editMessageText(`${aMsg.text}\n\n❌ Rejected`).catch(() => {})
       }
+      await tellOthers(`❌ ${aWho} rejected connecting the bot to "${aReq.title || aReq.chatId}".`)
       // The chat is NOT notified — a rejection stays silent so the bot's
       // presence is never confirmed there.
     }

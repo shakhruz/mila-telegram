@@ -39,6 +39,13 @@ from: `yes <code>` is only honoured in an owner's private chat. It used to be
 accepted from any approved sender — which included every connected group, where
 seeing the code in the conversation was enough to grant a tool run.
 
+With more than one owner, a join card goes to all of them at once and whoever
+taps first decides. The others get a follow-up message ("✅ *name* connected
+the bot to *chat* — mode: …", or the rejection equivalent) instead of a stale
+card — a second tap on an already-decided card answers "Already decided by
+another owner or expired." (Permission cards already go to every owner, but
+this cross-notification on decide is specific to the join card for now.)
+
 ## Secrets never reach the journal
 
 The daemon masks credentials in inbound messages *before* appending them to

@@ -12,6 +12,8 @@ This is an extended fork of the [official Telegram channel plugin](https://githu
 
 **Observer mode.** A group can be connected as an observer: the bot reads every message for context, but only replies when it's actually addressed (@mention or a reply to its own message). Everything else still reaches the session — so the assistant knows what's going on in the chat — but arrives marked `observe_only: "true"` with a note not to reply, and doesn't trigger a typing indicator or ack reaction. The older listen-only mode (bot hears the chat, replies are blocked mechanically) still works for chats already set up that way.
 
+**Co-owners.** With more than one owner on `owners`, a join card goes to all of them, and whoever taps first decides. The rest get a notification ("✅ *name* connected the bot to *chat* — mode: …", or the rejection equivalent) instead of a live card, so two owners can never approve the same request twice; a second tap on an already-decided card gets "Already decided by another owner or expired."
+
 **Voice transcription.** Voice notes are handed to a transcription command of your choice (set `TELEGRAM_VOICE_TRANSCRIBE_CMD`), and the text reaches the assistant along with the audio. Unset means voice notes simply pass through untranscribed — no default, no vendor.
 
 **Reply-quote context.** When someone replies to an earlier message, the quoted text travels with the new one, so the assistant answers about the message you actually pointed at instead of the last thing in the chat.
