@@ -93,14 +93,16 @@ This fork adds a shortcut. Add the bot to the group and send:
 /channel_join
 ```
 
-The bot sends the owner a four-button card in their private chat asking how the group should be connected:
+The bot sends the owner a four-button card in their private chat, with a short explanation of each mode, asking how the group should be connected:
 
 | Button | Effect |
 | --- | --- |
 | 💬 Reply to everyone | `requireMention: false` — the bot responds to every message (also requires disabling privacy mode, see below). |
 | 🏷 Mention-only | `requireMention: true` — the bot responds only when @mentioned or replied to. |
-| 👁 Listen only | `readOnly: true` — the bot hears the chat and forwards messages to the session, but replies into that chat are blocked mechanically: `reply` / `react` / `edit_message` refuse the chat_id. The chat gets no announcement — a silent presence. |
+| 👁 Observer | `observe: true` — every message in the chat is delivered to the session for context, but the bot only replies when it's actually addressed (@mention or a reply to its own message). Unaddressed messages arrive with `observe_only: "true"` in meta and a short note in the content telling the assistant not to reply — and get no typing indicator or ack reaction, since nothing is about to be sent. |
 | ❌ Reject | Drops the request. |
+
+`👁 Listen only` (`readOnly: true`) still works for chats already configured that way — the bot hears the chat and forwards messages to the session, but replies into that chat are blocked mechanically: `reply` / `react` / `edit_message` refuse the chat_id, and the chat gets no announcement. It's no longer offered as a join-card button (superseded by Observer for most cases), but existing `readOnly` groups keep working, and you can still set it by hand in `access.json`.
 
 ### Disconnecting
 
@@ -240,7 +242,11 @@ Configure outbound behavior with `/telegram:access set <key> <value>`.
       "allowFrom": [],
       // Listen-only: inbound messages reach the session, but outbound
       // sends to this chat are refused mechanically. Omit for normal chats.
-      "readOnly": false
+      "readOnly": false,
+      // Observer: every message is delivered for context, but the bot only
+      // replies when addressed. Unaddressed messages carry observe_only in
+      // meta and get no typing indicator or ack reaction.
+      "observe": false
     }
   },
 

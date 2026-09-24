@@ -116,6 +116,8 @@ type GroupPolicy = {
   allowFrom: string[]
   /** Listen-only mode: messages reach the session, outbound sends to the chat are blocked. */
   readOnly?: boolean
+  /** Observer mode: every message in the chat is delivered for context, but the bot only replies when addressed. */
+  observe?: boolean
 }
 
 type Access = {
@@ -234,6 +236,7 @@ const MODE_LABEL: Record<string, string> = {
   all: '💬 reply to everyone',
   mention: '🏷 mention-only',
   read: '👁 listen only',
+  observe: '👁 observer',
   deny: '❌ rejected',
 }
 
@@ -278,7 +281,7 @@ function regenChatsIndex(): void {
         const m = /^# (.+)$/m.exec(readFileSync(join(CHATS_DIR, `${id}.md`), 'utf8'))
         if (m) name = m[1]!
       } catch {}
-      const mode = g.readOnly ? MODE_LABEL.read : (g.requireMention ? MODE_LABEL.mention : MODE_LABEL.all)
+      const mode = g.readOnly ? MODE_LABEL.read : g.observe ? MODE_LABEL.observe : (g.requireMention ? MODE_LABEL.mention : MODE_LABEL.all)
       lines.push(`- ${name} · \`${id}\` · ${mode}`)
     }
     writeFileSync(join(STATE_DIR, 'CHATS.md'), lines.join('\n') + '\n', { mode: 0o600 })
@@ -320,7 +323,7 @@ function pruneExpired(a: Access): boolean {
 }
 
 type GateResult =
-  | { action: 'deliver'; access: Access }
+  | { action: 'deliver'; access: Access; observeOnly?: boolean }
   | { action: 'drop' }
   | { action: 'pair'; code: string; isResend: boolean }
 
@@ -374,6 +377,12 @@ function gate(ctx: Context): GateResult {
     const requireMention = policy.requireMention ?? true
     if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) {
       return { action: 'drop' }
+    }
+    if (policy.observe) {
+      // Observer: every message is delivered for context, but only a mention
+      // (or a reply to the bot) asks for a response — everything else is
+      // marked observe-only downstream.
+      return { action: 'deliver', access, observeOnly: !isMentioned(ctx, access.mentionPatterns) }
     }
     if (requireMention && !isMentioned(ctx, access.mentionPatterns)) {
       return { action: 'drop' }
@@ -500,6 +509,8 @@ const mcp = new Server(
       'Messages from Telegram arrive as <channel source="telegram" chat_id="..." message_id="..." user="..." ts="...">. If the tag has reply_quote, the sender is REPLYING to that quoted text — answer about the quote, not the latest topic. If the tag has an image_path attribute, Read that file — it is a photo the sender attached. If the tag has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path. Reply with the reply tool — pass chat_id back. Use reply_to (set to a message_id) only when replying to an earlier message; the latest message doesn\'t need a quote-reply, omit reply_to for normal responses.',
       '',
       'reply accepts file paths (files: ["/abs/path.png"]) for attachments. Use react to add emoji reactions, and edit_message for interim progress updates. Edits don\'t trigger push notifications — when a long task completes, send a new reply so the user\'s device pings.',
+      '',
+      'A group connected in observer mode delivers every message for context, but only a mention or a reply to the bot is a request for a response. Those other messages carry meta observe_only="true" and their content is prefixed with a note — read them for context, do not reply to them.',
       '',
       "Telegram's Bot API exposes no history or search — you only see messages as they arrive. If you need earlier context, ask the user to paste it or summarize.",
       '',
@@ -958,7 +969,7 @@ bot.command('channel_join', async ctx => {
       .text('💬 Reply to everyone', `join:all:${code}`)
       .text('🏷 Mention-only', `join:mention:${code}`)
       .row()
-      .text('👁 Listen only', `join:read:${code}`)
+      .text('👁 Observer', `join:observe:${code}`)
       .text('❌ Reject', `join:deny:${code}`)
     let delivered = 0
     for (const owner of ownersOf(access)) {
@@ -970,7 +981,10 @@ bot.command('channel_join', async ctx => {
           `chat_id: ${chatId}\n` +
           `requested by: ${joins[code].requestedByName} (${senderId})\n\n` +
           `How should it be connected?\n` +
-          `The request expires in 1 hour. [${code}]`,
+          `The request expires in 1 hour. [${code}]` +
+          `\n\n💬 Reply to everyone — reads and replies in the chat as needed.\n` +
+          `🏷 Mention-only — only sees messages that address it (@mention or a reply to its own message).\n` +
+          `👁 Observer — reads the whole chat for context, but only replies when addressed.`,
           { reply_markup: kb },
         )
         delivered++
@@ -1107,7 +1121,7 @@ bot.command('status', async ctx => {
 // Security mirrors the text-reply path: allowFrom must contain the sender.
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
-  const am = /^join(?:auto)?:(allow|deny|all|mention|read):([0-9a-f]{8})$/.exec(data)
+  const am = /^join(?:auto)?:(allow|deny|all|mention|read|observe):([0-9a-f]{8})$/.exec(data)
   if (am) {
     // These buttons only live in the owner's private chat — double gate.
     if (ctx.chat?.type !== 'private') {
@@ -1137,7 +1151,7 @@ bot.on('callback_query:data', async ctx => {
     if (aAct !== 'deny') {
       // Mode comes from the button; legacy 'allow' (old cards) maps to the safe
       // mention-only.
-      const mode = aAct === 'all' ? 'all' : aAct === 'read' ? 'read' : 'mention'
+      const mode = aAct === 'all' ? 'all' : aAct === 'read' ? 'read' : aAct === 'observe' ? 'observe' : 'mention'
       // read-modify-write immediately before the write. A repeat authorization
       // deliberately OVERWRITES the mode — that is how the owner changes it,
       // with another /channel_join.
@@ -1146,6 +1160,7 @@ bot.on('callback_query:data', async ctx => {
         requireMention: mode === 'mention',
         allowFrom: aAcc2.groups[aReq.chatId]?.allowFrom ?? [],
         ...(mode === 'read' ? { readOnly: true } : {}),
+        ...(mode === 'observe' ? { observe: true } : {}),
       }
       saveAccess(aAcc2)
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
@@ -1414,6 +1429,7 @@ async function handleInbound(
   }
 
   const access = result.access
+  const observeOnly = result.observeOnly === true
   const from = ctx.from!
   const chat_id = String(ctx.chat!.id)
   const msgId = ctx.message?.message_id
@@ -1450,12 +1466,14 @@ async function handleInbound(
   }
 
   // Typing indicator — signals "processing" until we reply (or ~5s elapses).
-  void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
+  // Observer mode: an unaddressed message gets no typing indicator or ack —
+  // the bot is reading for context, not about to respond.
+  if (!observeOnly) void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
 
   // Ack reaction — lets the user know we're processing. Fire-and-forget.
   // Telegram only accepts a fixed emoji whitelist — if the user configures
   // something outside that set the API rejects it and we swallow.
-  if (access.ackReaction && msgId != null) {
+  if (access.ackReaction && msgId != null && !observeOnly) {
     void bot.api
       .setMessageReaction(chat_id, msgId, [
         { type: 'emoji', emoji: access.ackReaction as ReactionTypeEmoji['emoji'] },
@@ -1470,9 +1488,10 @@ async function handleInbound(
   mcp.notification({
     method: 'notifications/claude/channel',
     params: {
-      content: text,
+      content: observeOnly ? `[observer mode — not addressed, do not reply, note context only]\n${text}` : text,
       meta: {
         chat_id,
+        ...(observeOnly ? { observe_only: 'true' } : {}),
         // Название чата — единственный способ отличить восемьдесят
         // подключённых чатов друг от друга: реестр, собранный из одних
         // числовых id, нечитаем, а Bot API не даёт списка чатов, чтобы
@@ -1588,7 +1607,7 @@ bot.on('my_chat_member', async ctx => {
       .text('💬 Reply to everyone', `joinauto:all:${code}`)
       .text('🏷 Mention-only', `joinauto:mention:${code}`)
       .row()
-      .text('👁 Listen only', `joinauto:read:${code}`)
+      .text('👁 Observer', `joinauto:observe:${code}`)
       .text('❌ Reject', `joinauto:deny:${code}`)
     let delivered = 0
     for (const owner of access.allowFrom) {
@@ -1600,7 +1619,10 @@ bot.on('my_chat_member', async ctx => {
           `chat_id: ${chatId}\n` +
           `added by: ${actorName} (${actorId})\n\n` +
           `How should it be connected?\n` +
-          `The request expires in 1 hour. [${code}]`,
+          `The request expires in 1 hour. [${code}]` +
+          `\n\n💬 Reply to everyone — reads and replies in the chat as needed.\n` +
+          `🏷 Mention-only — only sees messages that address it (@mention or a reply to its own message).\n` +
+          `👁 Observer — reads the whole chat for context, but only replies when addressed.`,
           { reply_markup: kb },
         )
         delivered++
