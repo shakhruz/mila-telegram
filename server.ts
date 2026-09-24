@@ -1784,7 +1784,47 @@ function botIsMember(status: string | undefined, isMember?: boolean): boolean {
   return false // left | kicked | undefined
 }
 
-bot.on('my_chat_member', async ctx => {
+// ─── Supergroup migration ───
+// Telegram promotes a group to a supergroup by giving it a NEW chat_id and
+// sending a migrate_from_chat_id/migrate_to_chat_id service message pointing
+// old → new. Without this, that looked like a brand-new chat and the owner
+// got a second "how should it be connected?" card for a group they'd already
+// approved. Now the connection (mode, allowFrom) and any pending request move
+// to the new id silently.
+function migrateGroup(oldId: string, newId: string): boolean {
+  if (!oldId || !newId || oldId === newId) return false
+  let moved = false
+  const access = loadAccess()
+  if (access.groups[oldId] && !access.groups[newId]) {
+    access.groups[newId] = access.groups[oldId]
+    delete access.groups[oldId]
+    saveAccess(access)
+    moved = true
+  }
+  const joins = loadJoins()
+  let jm = false
+  for (const r of Object.values(joins)) if (r.chatId === oldId) { r.chatId = newId; jm = true }
+  if (jm) saveJoins(joins)
+  if (moved || jm) process.stderr.write(`migrate: ${oldId} -> ${newId} (access=${moved}, join=${jm})\n`)
+  return moved || jm
+}
+bot.on('message:migrate_from_chat_id', ctx => {
+  try { migrateGroup(String(ctx.message.migrate_from_chat_id), String(ctx.chat.id)) } catch (err) {
+    process.stderr.write(`migrate_from handler error: ${scrubToken(err)}\n`)
+  }
+})
+bot.on('message:migrate_to_chat_id', ctx => {
+  try { migrateGroup(String(ctx.chat.id), String(ctx.message.migrate_to_chat_id)) } catch (err) {
+    process.stderr.write(`migrate_to handler error: ${scrubToken(err)}\n`)
+  }
+})
+
+// grammy processes updates sequentially, so an `await` here for the grace
+// period below would stall every other update behind it — that's the bug
+// this replaces. A setTimeout keeps the handler non-blocking while still
+// giving the migration service message above time to arrive and move the
+// connection first, before deciding whether a join card is still needed.
+async function onMyChatMember(ctx: any, deferred = false): Promise<void> {
   try {
     const upd = ctx.myChatMember
     if (!upd) return
@@ -1798,6 +1838,11 @@ bot.on('my_chat_member', async ctx => {
     if (wasIn || !nowIn) return
     if (STATIC) return
     const chatId = String(ctx.chat!.id)
+    // A group promoted straight to a supergroup on being added can deliver
+    // my_chat_member before the migrate_from_chat_id message above — wait one
+    // beat so the migration (if any) has a chance to land and claim this chat
+    // first, instead of firing a redundant join card.
+    if (chatType === 'supergroup' && !deferred) { setTimeout(() => { void onMyChatMember(ctx, true) }, 5000); return }
     const access = loadAccess()
     if (access.groups[chatId]) return // already connected — don't spam
     const joins = loadJoins()
@@ -1857,7 +1902,8 @@ bot.on('my_chat_member', async ctx => {
   } catch (err) {
     process.stderr.write(`my_chat_member: handler error: ${scrubToken(err)}\n`)
   }
-})
+}
+bot.on('my_chat_member', ctx => onMyChatMember(ctx))
 
 // ─── Bridge: replay daemon events into the session ───
 // While the receiver daemon is alive we read events from its journal instead of

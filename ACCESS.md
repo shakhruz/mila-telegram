@@ -92,6 +92,8 @@ Groups are off by default. Opt each one in individually.
 
 Supergroup IDs are negative numbers with a `-100` prefix, e.g. `-1001654782309`. They're not shown in the Telegram UI. To find one, either add [@RawDataBot](https://t.me/RawDataBot) to the group temporarily (it dumps a JSON blob including the chat ID), or add your bot and run `/telegram:access` to see recent dropped-from groups.
 
+A plain group that later gets promoted to a supergroup changes its chat_id — Telegram's own doing, not a reconnect. This fork moves an existing connection (and any pending request) to the new id automatically, so it doesn't look like a brand-new, unconnected chat and the owner doesn't get a second "how should it be connected?" card for a group they'd already approved.
+
 ### Joining a group without touching IDs
 
 This fork adds a shortcut. Add the bot to the group and send:
