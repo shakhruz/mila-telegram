@@ -644,6 +644,23 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             enum: ['text', 'markdownv2'],
             description: "Rendering mode. 'markdownv2' enables Telegram formatting (bold, italic, code, links). Caller must escape special chars per MarkdownV2 rules. Default: 'text' (plain, no escaping needed).",
           },
+          buttons: {
+            type: 'array',
+            description: "Inline buttons under the message — rows of up to 3 buttons each, 6 total. Each button is {label, url} for a link, or {label, choice} for a tap that arrives back as an inbound \"[button] <label>\" message. style: 'success' (green, the primary action) | 'primary' (blue) | 'danger' (red, reject/stop). A button's label follows the same accuracy rules as any other outbound text.",
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  url: { type: 'string' },
+                  choice: { type: 'string' },
+                  style: { type: 'string', enum: ['success', 'primary', 'danger'] },
+                },
+                required: ['label'],
+              },
+            },
+          },
         },
         required: ['chat_id', 'text'],
       },
@@ -722,17 +739,57 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const chunks = chunk(text, limit, mode)
         const sentIds: number[] = []
 
+        // Buttons go on the last chunk. A `choice` button is registered in
+        // CARDS_FILE — the poller reads it back when tapped (see
+        // handleCardTap above): gate, disable, deliver as an inbound event.
+        const rawRows = (args.buttons as Array<Array<{ label: string; url?: string; choice?: string; style?: string }>> | undefined) ?? []
+        let replyMarkup: Record<string, unknown> | undefined
+        let cardRec: Record<string, unknown> | undefined
+        if (rawRows.length) {
+          const cardId = 'c' + Math.random().toString(36).slice(2, 10)
+          let n = 0
+          const rows = rawRows.map(row => row.slice(0, 3).filter(b => b && b.label && (b.url || b.choice) && n++ < 6).map(b => {
+            const style = ['success', 'primary', 'danger'].includes(String(b.style)) ? { style: b.style } : {}
+            if (b.url) {
+              if (!/^https?:\/\/|^tg:\/\//.test(b.url)) throw new Error(`button url must be http(s) or tg://: ${b.url}`)
+              return { text: String(b.label).slice(0, 64), url: b.url, ...style }
+            }
+            const data = String(b.choice).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 20) || 'x'
+            return { text: String(b.label).slice(0, 64), callback_data: `card:${cardId}:${data}`, ...style, _data: data }
+          })).filter(r => r.length)
+          const hasChoice = rows.some(r => r.some(b => 'callback_data' in b))
+          if (hasChoice) {
+            // Only the chat the card was sent to may tap it. A DM card is
+            // restricted to that one user; a group card is open to the group
+            // (Telegram already gates who is a member of it).
+            const isPrivate = !String(chat_id).startsWith('-')
+            cardRec = {
+              card_id: cardId, chat_id, allow: isPrivate ? [String(chat_id)] : [],
+              text: text.slice(0, 500), ts: new Date().toISOString(),
+              buttons: rows.map(r => r.map(b => ('_data' in b) ? { label: b.text, data: (b as any)._data } : { label: b.text, url: (b as any).url })),
+            }
+          }
+          replyMarkup = { inline_keyboard: rows.map(r => r.map(b => { const { _data, ...rest } = b as any; return rest })) }
+        }
+
         try {
           for (let i = 0; i < chunks.length; i++) {
             const shouldReplyTo =
               reply_to != null &&
               replyMode !== 'off' &&
               (replyMode === 'all' || i === 0)
+            const last = i === chunks.length - 1
             const sent = await bot.api.sendMessage(chat_id, chunks[i], {
               ...(shouldReplyTo ? { reply_parameters: { message_id: reply_to } } : {}),
               ...(parseMode ? { parse_mode: parseMode } : {}),
+              ...(last && replyMarkup ? { reply_markup: replyMarkup as any } : {}),
             })
             sentIds.push(sent.message_id)
+            if (last && cardRec) {
+              try {
+                appendFileSync(CARDS_FILE, JSON.stringify({ ...cardRec, message_id: sent.message_id }) + '\n', { mode: 0o600 })
+              } catch (e) { process.stderr.write(`buttons: card registry write failed: ${e}\n`) }
+            }
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
@@ -965,12 +1022,16 @@ bot.command('channel_join', async ctx => {
       expiresAt: now + JOIN_TTL_MS,
     }
     saveJoins(joins)
-    const kb = new InlineKeyboard()
-      .text('💬 Reply to everyone', `join:all:${code}`)
-      .text('🏷 Mention-only', `join:mention:${code}`)
-      .row()
-      .text('👁 Observer', `join:observe:${code}`)
-      .text('❌ Reject', `join:deny:${code}`)
+    // Colored buttons (Bot API `style`): green for the everyday choice, blue
+    // for the cautious default, red for the destructive one — readable at a
+    // glance without reading the labels. grammy's InlineKeyboard builder
+    // predates the `style` field, so this is a raw keyboard object instead.
+    const kb = { inline_keyboard: [
+      [{ text: '💬 Reply to everyone', callback_data: `join:all:${code}`, style: 'success' },
+       { text: '🏷 Mention-only', callback_data: `join:mention:${code}`, style: 'primary' }],
+      [{ text: '👁 Observer', callback_data: `join:observe:${code}` },
+       { text: '❌ Reject', callback_data: `join:deny:${code}`, style: 'danger' }],
+    ] } as any
     let delivered = 0
     for (const owner of ownersOf(access)) {
       try {
@@ -1116,11 +1177,156 @@ bot.command('status', async ctx => {
   await ctx.reply(`Not paired. Send me a message to get a pairing code.`)
 })
 
+// ─── Interactive buttons on the assistant's own messages ───
+// The `reply` tool's `buttons` param renders inline buttons under a message.
+// A `url` button is a plain Telegram link button. A `choice` button is
+// registered here in CARDS_FILE and its tap comes back into the session as an
+// inbound "[button] <label>" — the same gate/disable/deliver shape as the join
+// and permission cards above, generalized for the assistant's own replies.
+const CARDS_FILE = join(STATE_DIR, 'cards.jsonl')
+
+type CardButton = { label: string; data?: string; url?: string }
+type CardRecord = {
+  card_id: string; chat_id: string | number; message_id?: number
+  allow?: Array<string | number>; text?: string
+  buttons?: CardButton[][]; used_ts?: string; used_by?: string
+}
+
+function cardState(cardId: string): { card: CardRecord | null; used: CardRecord | null } {
+  let card: CardRecord | null = null, used: CardRecord | null = null
+  try {
+    for (const line of readFileSync(CARDS_FILE, 'utf8').split('\n')) {
+      if (!line.trim()) continue
+      let r: CardRecord
+      try { r = JSON.parse(line) } catch { continue }
+      if (r.card_id !== cardId) continue
+      if (r.used_ts) used = r
+      else card = r
+    }
+  } catch {}
+  return { card, used }
+}
+
+function noteSuspiciousCardTap(entry: Record<string, unknown>): void {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+    appendFileSync(join(STATE_DIR, 'suspicious.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: 0o600 })
+  } catch {}
+}
+
+async function rawApi(method: string, params: Record<string, unknown>): Promise<any> {
+  // Direct Bot API call: the bundled grammy version predates Bot API 10.3's
+  // `disabled`/`style` fields, so its types would only get in the way here.
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    return await res.json()
+  } catch (err) {
+    return { ok: false, description: scrubToken(err) }
+  }
+}
+
+// Buttons go dead after a decision: the same card must not decide twice, and
+// the chat history should show what was picked. `disabled` marks the button
+// itself (Bot API 10.3); the chosen one also gets a ✅ prefix.
+async function disableCardButtons(card: CardRecord, chosenData: string): Promise<void> {
+  const rows = card.buttons ?? []
+  const mk = (b: CardButton) => ({ text: (b.data === chosenData ? '✅ ' : '') + b.label, disabled: {} })
+  const kb = { inline_keyboard: rows.map(r => r.map(mk)) }
+  let resp = await rawApi('editMessageReplyMarkup', { chat_id: card.chat_id, message_id: card.message_id, reply_markup: kb })
+  if (!resp?.ok) {
+    // Older Bot API without `disabled` → drop the keyboard entirely. The
+    // registry already gates re-taps mechanically; a live-looking button that
+    // no longer does anything is worse than none.
+    resp = await rawApi('editMessageReplyMarkup', { chat_id: card.chat_id, message_id: card.message_id, reply_markup: { inline_keyboard: [] } })
+    if (!resp?.ok) process.stderr.write(`card ${card.card_id}: disable failed: ${resp?.description}\n`)
+  }
+}
+
+async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promise<void> {
+  // The value is data, not markup — same rule as message text: control
+  // characters are stripped before anything reaches the journal.
+  const value = rawValue.replace(/[<>\r\n]/g, '_').slice(0, 64)
+  const from = ctx.from
+  const userId = from ? String(from.id) : '?'
+  const userName = from?.username ? String(from.username) : userId
+  const chatId = ctx.chat ? String(ctx.chat.id) : ''
+  const msgId = ctx.callbackQuery?.message?.message_id
+
+  const { card, used } = cardState(cardId)
+  if (!card) {
+    await ctx.answerCallbackQuery({ text: 'Button not found or expired.' }).catch(() => {})
+    return
+  }
+  const allow = (card.allow ?? []).map(String)
+  if (allow.length > 0 && !allow.includes(userId)) {
+    // Someone else's tap: a short refusal, a trace in suspicious.jsonl, and
+    // NOTHING delivered to the session.
+    await ctx.answerCallbackQuery({ text: 'This button is not for you.' }).catch(() => {})
+    noteSuspiciousCardTap({
+      kind: 'card_tap_denied', card_id: cardId, chat_id: chatId,
+      message_id: msgId, user: userName, user_id: userId, data: value,
+    })
+    return
+  }
+  if (used) {
+    await ctx.answerCallbackQuery({ text: 'Already handled.' }).catch(() => {})
+    return
+  }
+  // Mark used BEFORE delivering — a race between two taps must not produce
+  // two decisions. answerCallbackQuery is mandatory or the client spins forever.
+  try {
+    appendFileSync(CARDS_FILE, JSON.stringify({
+      card_id: cardId, used_ts: new Date().toISOString(), used_by: userId,
+    }) + '\n', { mode: 0o600 })
+  } catch {}
+  await ctx.answerCallbackQuery({ text: '✅ Got it' }).catch(() => {})
+
+  const label = (card.buttons ?? []).flat().find(b => b.data === value)?.label
+  void mcp.notification({
+    method: 'notifications/claude/channel',
+    params: {
+      content: `[button] ${label ?? value}`,
+      meta: {
+        type: 'callback',
+        chat_id: chatId,
+        ...(ctx.chat && 'title' in ctx.chat && ctx.chat.title
+            ? { chat_title: String(ctx.chat.title).slice(0, 128) } : {}),
+        ...(msgId != null ? { message_id: String(msgId) } : {}),
+        user: userName,
+        user_id: userId,
+        callback_data: value,
+        card_id: cardId,
+        ts: new Date().toISOString(),
+      },
+    },
+  }).catch(err => {
+    process.stderr.write(`card ${cardId}: failed to deliver callback event: ${err}\n`)
+  })
+
+  await disableCardButtons(card, value).catch(err => {
+    process.stderr.write(`card ${cardId}: disable error: ${err}\n`)
+  })
+}
+
 // Inline-button handler for permission requests. Callback data is
 // `perm:allow:<id>`, `perm:deny:<id>`, or `perm:more:<id>`.
 // Security mirrors the text-reply path: allowFrom must contain the sender.
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
+  const cm = /^card:([A-Za-z0-9_-]{1,32}):([\s\S]*)$/.exec(data)
+  if (cm) {
+    try {
+      await handleCardTap(ctx, cm[1]!, cm[2]!)
+    } catch (err) {
+      process.stderr.write(`card tap handler error: ${scrubToken(err)}\n`)
+      await ctx.answerCallbackQuery().catch(() => {})
+    }
+    return
+  }
   const am = /^join(?:auto)?:(allow|deny|all|mention|read|observe):([0-9a-f]{8})$/.exec(data)
   if (am) {
     // These buttons only live in the owner's private chat — double gate.
@@ -1615,12 +1821,13 @@ bot.on('my_chat_member', async ctx => {
       expiresAt: now + JOIN_TTL_MS,
     }
     saveJoins(joins)
-    const kb = new InlineKeyboard()
-      .text('💬 Reply to everyone', `joinauto:all:${code}`)
-      .text('🏷 Mention-only', `joinauto:mention:${code}`)
-      .row()
-      .text('👁 Observer', `joinauto:observe:${code}`)
-      .text('❌ Reject', `joinauto:deny:${code}`)
+    // Colored buttons — see the /channel_join card above for why.
+    const kb = { inline_keyboard: [
+      [{ text: '💬 Reply to everyone', callback_data: `joinauto:all:${code}`, style: 'success' },
+       { text: '🏷 Mention-only', callback_data: `joinauto:mention:${code}`, style: 'primary' }],
+      [{ text: '👁 Observer', callback_data: `joinauto:observe:${code}` },
+       { text: '❌ Reject', callback_data: `joinauto:deny:${code}`, style: 'danger' }],
+    ] } as any
     let delivered = 0
     for (const owner of access.allowFrom) {
       try {

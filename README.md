@@ -14,6 +14,8 @@ This is an extended fork of the [official Telegram channel plugin](https://githu
 
 **Co-owners.** With more than one owner on `owners`, a join card goes to all of them, and whoever taps first decides. The rest get a notification ("✅ *name* connected the bot to *chat* — mode: …", or the rejection equivalent) instead of a live card, so two owners can never approve the same request twice; a second tap on an already-decided card gets "Already decided by another owner or expired."
 
+**Interactive buttons.** The join card's buttons are colored (green for the everyday choice, blue for the cautious default, red for reject) instead of plain text, so the right one is readable at a glance. The `reply` tool also takes a `buttons` param: a `url` button opens a link, and a `choice` button comes back into the session as an inbound `[button] <label>` message when tapped — good for an A/B choice or a confirm/cancel that doesn't need a full reply typed out. A `choice` card goes dead after the first tap; a plain link button never needs to.
+
 **Voice transcription.** Voice notes are handed to a transcription command of your choice (set `TELEGRAM_VOICE_TRANSCRIBE_CMD`), and the text reaches the assistant along with the audio. Unset means voice notes simply pass through untranscribed — no default, no vendor.
 
 **Reply-quote context.** When someone replies to an earlier message, the quoted text travels with the new one, so the assistant answers about the message you actually pointed at instead of the last thing in the chat.
@@ -111,7 +113,7 @@ IDs are numeric user IDs — get yours from [@userinfobot](https://t.me/userinfo
 
 | Tool | Purpose |
 | --- | --- |
-| `reply` | Send to a chat. Takes `chat_id` + `text`, optionally `reply_to` for native threading and `files` (absolute paths) for attachments. Images send as photos, everything else as documents, 50MB each. Long text is chunked. Returns the sent message ID(s). |
+| `reply` | Send to a chat. Takes `chat_id` + `text`, optionally `reply_to` for native threading, `files` (absolute paths) for attachments, and `buttons` (rows of `{label, url\|choice, style}`) for inline buttons. Images send as photos, everything else as documents, 50MB each. Long text is chunked. Returns the sent message ID(s). |
 | `react` | Add an emoji reaction by message ID. Telegram's fixed whitelist only (👍 👎 ❤ 🔥 👀 …). |
 | `edit_message` | Edit a message the bot sent. Good for "working…" → result. Own messages only. |
 | `download_attachment` | Fetch a file by `file_id` from an inbound message and return its local path. |

@@ -100,7 +100,7 @@ This fork adds a shortcut. Add the bot to the group and send:
 /channel_join
 ```
 
-The bot sends the owner a four-button card in their private chat, with a short explanation of each mode, asking how the group should be connected:
+The bot sends the owner a four-button card in their private chat, colored (green/blue/red via the Bot API's `style` field) and with a short explanation of each mode, asking how the group should be connected:
 
 | Button | Effect |
 | --- | --- |
