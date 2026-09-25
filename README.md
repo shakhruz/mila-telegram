@@ -2,6 +2,10 @@
 
 Run your Claude Code session from Telegram — and keep it running.
 
+![Mila Telegram](docs/preview.png)
+
+**Part of [Mila Companion](https://github.com/shakhruz/mila-companion)** — the kit that turns this into an AI employee. Want it hosted? [Mila Pro](https://t.me/mila_tashkent_bot?start=pro_github_tg).
+
 This is an extended fork of the [official Telegram channel plugin](https://github.com/anthropics/claude-plugins-official) (Apache-2.0). The original connects a Telegram bot to a Claude Code session. This fork adds the things you start needing once you actually work that way every day: teams in group chats, voice notes, and a poller that doesn't lose your messages when the session restarts.
 
 ## What this fork adds
