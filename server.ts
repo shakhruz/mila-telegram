@@ -18,6 +18,7 @@ import {
 import { z } from 'zod'
 import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './permission_policy'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
+import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
@@ -101,6 +102,8 @@ process.on('uncaughtException', err => {
 const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
 
 const bot = new Bot(TOKEN)
+// SUPERGROUP-1004: 400 "upgraded to a supergroup" -> migrate access, retry on the new id
+bot.api.config.use(supergroupTransformer(STATE_DIR, 'server'))
 let botUsername = ''
 
 type PendingEntry = {
@@ -305,7 +308,7 @@ function assertAllowedChat(chat_id: string): void {
 function saveAccess(a: Access): void {
   if (STATIC) return
   mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
-  const tmp = ACCESS_FILE + '.tmp'
+  const tmp = ACCESS_FILE + '.tmp.' + process.pid
   writeFileSync(tmp, JSON.stringify(a, null, 2) + '\n', { mode: 0o600 })
   renameSync(tmp, ACCESS_FILE)
 }
@@ -946,6 +949,29 @@ type JoinRequest = {
   expiresAt: number
 }
 
+// SUPERGROUP-1004: group -> supergroup changes chat_id. Access, chat card, CHATS.md and the
+// pending join request all move to the new id (old id removed). See supergroup.mjs.
+function migrateGroup(oldId: string, newId: string): boolean {
+  if (!oldId || !newId || oldId === newId || STATIC) return false
+  const r = migrateChat(STATE_DIR, oldId, newId, 'update')
+  const joins = loadJoins()
+  let jm = false
+  for (const q of Object.values(joins)) if (q.chatId === oldId) { q.chatId = newId; jm = true }
+  if (jm) saveJoins(joins)
+  if (r.access || r.card || jm) { regenChatsIndex(); process.stderr.write(`migrate: ${oldId} -> ${newId} (access=${r.access}, card=${r.card}, join=${jm})\n`) }
+  return r.access || r.card || jm
+}
+bot.on('message:migrate_from_chat_id', ctx => {
+  try { migrateGroup(String(ctx.message.migrate_from_chat_id), String(ctx.chat.id)) } catch (err) {
+    process.stderr.write(`migrate_from handler error: ${err}\n`)
+  }
+})
+bot.on('message:migrate_to_chat_id', ctx => {
+  try { migrateGroup(String(ctx.chat.id), String(ctx.message.migrate_to_chat_id)) } catch (err) {
+    process.stderr.write(`migrate_to handler error: ${err}\n`)
+  }
+})
+
 function loadJoins(): Record<string, JoinRequest> {
   try {
     return JSON.parse(readFileSync(JOIN_FILE, 'utf8')) as Record<string, JoinRequest>
@@ -1096,8 +1122,8 @@ bot.command('mila_leave', async ctx => {
     return
   }
 
-  delete access.groups[chatId]
-  saveAccess(access)
+  // SUPERGROUP-1004: the await above made `access` a stale snapshot - delete on a fresh read
+  if (!STATIC) mutateAccess(STATE_DIR, raw => { delete raw.groups[chatId] })
   logAuth({
     chat_id: chatId,
     title: ('title' in chat && chat.title) || '',
