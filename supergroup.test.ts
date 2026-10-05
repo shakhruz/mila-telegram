@@ -89,3 +89,25 @@ test('race: two processes mutating access.json lose no writes', async () => {
   for (const t of ['a', 'b']) for (let i = 0; i < 40; i++) expect(g[t + i]).toBeDefined()
   expect(g[OLD]).toBeDefined()
 })
+
+test('real grammy Bot against a mock Bot API: 400 migrate_to_chat_id -> retried on new id, state migrated', async () => {
+  const { Bot } = await import('grammy')
+  const seen: string[] = []
+  const srv = Bun.serve({ port: 0, async fetch(req) {
+    const b: any = await req.json()
+    seen.push(String(b.chat_id))
+    if (String(b.chat_id) === OLD) {
+      return Response.json({ ok: false, error_code: 400, description: 'Bad Request: group chat was upgraded to a supergroup chat', parameters: { migrate_to_chat_id: Number(NEW) } }, { status: 400 })
+    }
+    return Response.json({ ok: true, result: { message_id: 7, chat: { id: Number(b.chat_id) }, date: 1, text: b.text } })
+  } })
+  try {
+    const bot = new Bot('123:TEST', { botInfo: { id: 123, is_bot: true, first_name: 'T', username: 't_bot' } as any, client: { apiRoot: `http://localhost:${srv.port}` } })
+    bot.api.config.use(supergroupTransformer(dir, 'test'))
+    const m = await bot.api.sendMessage(OLD, 'hello')
+    expect(m.message_id).toBe(7)
+    expect(seen).toEqual([OLD, NEW])
+    expect(acc().groups[NEW]).toBeDefined(); expect(acc().groups[OLD]).toBeUndefined()
+    await bot.api.sendMessage(OLD, 'again'); expect(seen.slice(2)).toEqual([NEW])
+  } finally { srv.stop(true) }
+})
