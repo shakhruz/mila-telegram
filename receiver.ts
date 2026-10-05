@@ -1023,29 +1023,6 @@ type JoinRequest = {
   expiresAt: number
 }
 
-// SUPERGROUP-1004: group -> supergroup changes chat_id. Access, chat card, CHATS.md and the
-// pending join request all move to the new id (old id removed). See supergroup.mjs.
-function migrateGroup(oldId: string, newId: string): boolean {
-  if (!oldId || !newId || oldId === newId || STATIC) return false
-  const r = migrateChat(STATE_DIR, oldId, newId, 'update')
-  const joins = loadJoins()
-  let jm = false
-  for (const q of Object.values(joins)) if (q.chatId === oldId) { q.chatId = newId; jm = true }
-  if (jm) saveJoins(joins)
-  if (r.access || r.card || jm) { regenChatsIndex(); process.stderr.write(`migrate: ${oldId} -> ${newId} (access=${r.access}, card=${r.card}, join=${jm})\n`) }
-  return r.access || r.card || jm
-}
-bot.on('message:migrate_from_chat_id', ctx => {
-  try { migrateGroup(String(ctx.message.migrate_from_chat_id), String(ctx.chat.id)) } catch (err) {
-    process.stderr.write(`migrate_from handler error: ${err}\n`)
-  }
-})
-bot.on('message:migrate_to_chat_id', ctx => {
-  try { migrateGroup(String(ctx.chat.id), String(ctx.message.migrate_to_chat_id)) } catch (err) {
-    process.stderr.write(`migrate_to handler error: ${err}\n`)
-  }
-})
-
 function loadJoins(): Record<string, JoinRequest> {
   try {
     return JSON.parse(readFileSync(JOIN_FILE, 'utf8')) as Record<string, JoinRequest>
@@ -1938,21 +1915,14 @@ bot.on('message_reaction', async ctx => {
 // approved. Now the connection (mode, allowFrom) and any pending request move
 // to the new id silently.
 function migrateGroup(oldId: string, newId: string): boolean {
-  if (!oldId || !newId || oldId === newId) return false
-  let moved = false
-  const access = loadAccess()
-  if (access.groups[oldId] && !access.groups[newId]) {
-    access.groups[newId] = access.groups[oldId]
-    delete access.groups[oldId]
-    saveAccess(access)
-    moved = true
-  }
+  if (!oldId || !newId || oldId === newId || STATIC) return false
+  const r = migrateChat(STATE_DIR, oldId, newId, 'update')
   const joins = loadJoins()
   let jm = false
-  for (const r of Object.values(joins)) if (r.chatId === oldId) { r.chatId = newId; jm = true }
+  for (const q of Object.values(joins)) if (q.chatId === oldId) { q.chatId = newId; jm = true }
   if (jm) saveJoins(joins)
-  if (moved || jm) process.stderr.write(`migrate: ${oldId} -> ${newId} (access=${moved}, join=${jm})\n`)
-  return moved || jm
+  if (r.access || r.card || jm) { regenChatsIndex(); process.stderr.write(`migrate: ${oldId} -> ${newId} (access=${r.access}, card=${r.card}, join=${jm})\n`) }
+  return r.access || r.card || jm
 }
 bot.on('message:migrate_from_chat_id', ctx => {
   try { migrateGroup(String(ctx.message.migrate_from_chat_id), String(ctx.chat.id)) } catch (err) {
