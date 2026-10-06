@@ -19,6 +19,7 @@ import { z } from 'zod'
 import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './permission_policy'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
+import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
@@ -398,6 +399,25 @@ function gate(ctx: Context): GateResult {
   }
 
   return { action: 'drop' }
+}
+
+// LOGIN-SELF-1006: no model needed to hand the owner a login button (see login-self.mjs).
+// Returns true when the message was a login request served here (don't pass it on).
+async function loginSelfHook(ctx: Context, text: string): Promise<boolean> {
+  try {
+    const from = ctx.from
+    if (!from || !ctx.chat) return false
+    const access = loadAccess()
+    const r = await loginSelf({
+      api: bot.api, slug: process.env.COMPANION_SLUG ?? '', botUsername: botUsername || process.env.BOT_USERNAME || '',
+      stateDir: join(process.env.HOME ?? '/home/companion', 'state'), authMode: process.env.COMPANION_AUTH ?? 'subscription',
+      chatType: ctx.chat.type, chatId: ctx.chat.id, senderId: from.id, isOwner: isOwner(access, String(from.id)), text,
+    })
+    return r.swallow
+  } catch (err) {
+    process.stderr.write(`telegram channel: login-self failed: ${err}\n`)
+    return false
+  }
 }
 
 // Like gate() but for bot commands: no pairing side effects, just allow/drop.
@@ -1219,6 +1239,7 @@ bot.command('start', async ctx => {
     `2. In Claude Code: /telegram:access pair <code>\n\n` +
     `After that, DMs here reach that session.`
   )
+  await loginSelfHook(ctx, '/start')  // LOGIN-SELF-1006
 })
 
 bot.command('help', async ctx => {
@@ -1725,6 +1746,7 @@ async function handleInbound(
 
   const access = result.access
   const observeOnly = result.observeOnly === true
+  if (!observeOnly && await loginSelfHook(ctx, text)) return
   const from = ctx.from!
   const chat_id = String(ctx.chat!.id)
   const msgId = ctx.message?.message_id
