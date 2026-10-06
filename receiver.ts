@@ -9,6 +9,7 @@
  * Telegram's Bot API has no history or search. Reply-only tools.
  */
 
+import { replyQuote } from './reply-quote.mjs'  // QUOTE-3000-1006
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -1827,10 +1828,7 @@ async function handleInbound(
           reply_to_message_id: String(ctx.message.reply_to_message.message_id),
           reply_to_user: ctx.message.reply_to_message.from?.username
             ?? String(ctx.message.reply_to_message.from?.id ?? ''),
-          reply_quote: (((ctx.message as any).quote?.text
-            ?? ctx.message.reply_to_message.text
-            ?? (ctx.message.reply_to_message as any).caption
-            ?? '') as string).slice(0, 400),
+          reply_quote: replyQuote(ctx.message as any), // QUOTE-3000-1006
         } : {}),
         ...(imagePath ? { image_path: imagePath } : {}),
         ...(attachment ? {
