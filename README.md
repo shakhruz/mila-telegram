@@ -4,7 +4,7 @@ Run your Claude Code session from Telegram — and keep it running.
 
 ![Mila Telegram](docs/preview.png)
 
-**Part of [Mila Companion](https://github.com/shakhruz/mila-companion)** — the kit that turns this into an AI employee. Want it hosted? [Mila Pro](https://t.me/mila_tashkent_bot?start=pro_github_tg).
+**Part of [Mila](https://github.com/shakhruz/mila)** — the kit that turns this into an AI employee. Want it hosted? [Mila Pro](https://t.me/mila_tashkent_bot?start=pro_github_tg).
 
 This is an extended fork of the [official Telegram channel plugin](https://github.com/anthropics/claude-plugins-official) (Apache-2.0). The original connects a Telegram bot to a Claude Code session. This fork adds the things you start needing once you actually work that way every day: teams in group chats, voice notes, and a poller that doesn't lose your messages when the session restarts.
 
@@ -73,8 +73,10 @@ This writes `TELEGRAM_BOT_TOKEN=...` to `~/.claude/channels/telegram/.env`. You 
 **4. Relaunch with the channel flag.** The server won't connect without it:
 
 ```sh
-claude --channels plugin:mila-telegram@mila
+claude --dangerously-load-development-channels plugin:mila-telegram@mila
 ```
+
+Why not plain `--channels`: channels are a research preview in Claude Code, and `--channels` accepts only plugins on Anthropic's approved list — `mila-telegram` is not on it yet, so with `--channels` the channel silently does not register. The development flag lets this one plugin, named in the command, push messages into your session; it does not skip permission prompts and does not load anything else. See [Claude Code — channels](https://code.claude.com/docs/en/channels#research-preview).
 
 **5. Pair.** DM your bot; it replies with a 6-character code. In the session:
 
