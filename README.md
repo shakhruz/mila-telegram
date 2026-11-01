@@ -52,7 +52,8 @@ Read this before you put it on a machine that matters.
 - **Processes:** `ps` once at start (to find a stale poller of the same bot); your own transcription command, only if you set
   `TELEGRAM_VOICE_TRANSCRIBE_CMD` (it receives the path of a downloaded voice note).
 - **Files:** everything under `~/.claude/channels/telegram/` (or `TELEGRAM_STATE_DIR`): `.env` with the bot token (600), `access.json`,
-  the inbound journal the daemon writes, downloaded attachments. Nothing outside it.
+  the inbound journal the daemon writes, downloaded attachments. One exception: the sign-in reminder reads `~/state/auth` and keeps
+  its own timestamps in `~/state/login-self.json` (a Mila setup convention; without `~/state/auth` it does nothing).
 - **Outbound messages** go only to chats on your allowlist, and only when the assistant calls the `reply` tool (see Security).
 
 ## Prerequisites
