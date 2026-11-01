@@ -47,6 +47,8 @@ Read this before you put it on a machine that matters.
 
 ## What it runs, sends and stores
 
+Full privacy policy: [PRIVACY.md](PRIVACY.md).
+
 - **Network at runtime:** only the Telegram Bot API (`https://api.telegram.org`) with your bot token. No telemetry.
 - **On start:** Claude Code runs `bun ${CLAUDE_PLUGIN_ROOT}/server.ts` — no wrapper script. The two dependencies
   (`@modelcontextprotocol/sdk`, `grammy`) are installed by Claude Code itself when it installs or updates the plugin, from `bun.lock`
