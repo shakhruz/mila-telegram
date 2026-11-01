@@ -2,7 +2,7 @@
   "name": "mila-telegram",
   "displayName": "Mila Telegram",
   "description": "Telegram channel for Claude Code for teams and small businesses: a receiver daemon that keeps the bot online while the session restarts, groups with per-chat modes and owner approval, voice transcription, reply-quote context, inline buttons. Fork of Anthropic's Telegram channel plugin (Apache-2.0).",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "MILAGPT",
     "url": "https://github.com/shakhruz"
@@ -10,6 +10,7 @@
   "homepage": "https://github.com/shakhruz/mila-telegram",
   "repository": "https://github.com/shakhruz/mila-telegram",
   "license": "Apache-2.0",
+  "icon": "./.claude-plugin/icon.png",
   "keywords": [
     "telegram",
     "messaging",
