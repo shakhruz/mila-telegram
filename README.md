@@ -4,7 +4,7 @@ Run your Claude Code session from Telegram — and keep it running.
 
 ![Mila Telegram](docs/preview.png)
 
-**Part of [Mila](https://github.com/shakhruz/mila)** — the kit that turns this into an AI employee. Want it hosted? [Mila Pro](https://t.me/mila_tashkent_bot?start=pro_github_tg).
+**Part of [Mila](https://github.com/shakhruz/mila-agent)** — the kit that turns this into an AI employee. Want it hosted? [Mila Pro](https://t.me/mila_tashkent_bot?start=pro_github_tg).
 
 This is an extended fork of the [official Telegram channel plugin](https://github.com/anthropics/claude-plugins-official) (Apache-2.0). The original connects a Telegram bot to a Claude Code session. This fork adds the things you start needing once you actually work that way every day: teams in group chats, voice notes, and a poller that doesn't lose your messages when the session restarts.
 
@@ -44,6 +44,16 @@ Read this before you put it on a machine that matters.
 **The event journal is a trust boundary.** The daemon writes events to a file and the session replays them; whatever can write that file speaks with the voice of Telegram. The journal and its directory are created `0600`/`0700`, and the bridge replays only an allowlist of two methods so a forged line cannot invoke arbitrary ones. Keep the state directory on a filesystem only you can write.
 
 **Your token lives in `~/.claude/channels/telegram/.env`** at `0600`, and is stripped from error output before anything is logged.
+
+## What it runs, sends and stores
+
+- **Network:** only the Telegram Bot API (`https://api.telegram.org`) with your bot token. No telemetry, no other hosts.
+- **On start:** `bun install` installs the two dependencies from `package.json` / `bun.lock` (`@modelcontextprotocol/sdk`, `grammy`), then runs `server.ts`.
+- **Processes:** `ps` once at start (to find a stale poller of the same bot); your own transcription command, only if you set
+  `TELEGRAM_VOICE_TRANSCRIBE_CMD` (it receives the path of a downloaded voice note).
+- **Files:** everything under `~/.claude/channels/telegram/` (or `TELEGRAM_STATE_DIR`): `.env` with the bot token (600), `access.json`,
+  the inbound journal the daemon writes, downloaded attachments. Nothing outside it.
+- **Outbound messages** go only to chats on your allowlist, and only when the assistant calls the `reply` tool (see Security).
 
 ## Prerequisites
 
