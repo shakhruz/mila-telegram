@@ -16,5 +16,19 @@
     "channel",
     "mcp",
     "remote-control"
+  ],
+  "channels": [
+    {
+      "server": "telegram",
+      "displayName": "Telegram",
+      "userConfig": {
+        "bot_token": {
+          "type": "string",
+          "title": "Telegram bot token",
+          "description": "The token @BotFather gave you (digits, a colon, then letters). Stored in your system's secure credential store. Leave empty if you already saved it with the configure skill (it goes to ~/.claude/channels/telegram/.env).",
+          "sensitive": true
+        }
+      }
+    }
   ]
 }

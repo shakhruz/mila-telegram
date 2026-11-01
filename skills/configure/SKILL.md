@@ -4,7 +4,7 @@ description: Set up the Telegram channel — save the bot token and review acces
 user-invocable: true
 allowed-tools:
   - Read
-  - Write
+  - Write(~/.claude/channels/telegram/**)
   - Bash(ls *)
   - Bash(mkdir *)
   - Bash(echo *)
@@ -15,6 +15,12 @@ allowed-tools:
 
 Writes the bot token to `<state-dir>/.env` and orients the user on access
 policy. The server reads both files at boot.
+
+**Preferred place for the token:** the plugin's own setting. The user runs
+`/plugin configure mila-telegram@mila` (or fills the field when installing);
+Claude Code keeps it in the system's secure credential store and hands it to
+the server. A token set there wins over `.env`. `.env` stays as the fallback
+for setups that already use it — mention both, don't move a working token.
 
 **Resolve the state directory first** (it may be overridden for multi-bot or
 per-project setups):
@@ -47,8 +53,9 @@ Read both state files and give the user a complete picture:
    - Pending pairings: count, with codes and display names if any
 
 3. **What next** — end with a concrete next step based on state:
-   - No token → *"Run `/telegram:configure <token>` with the token from
-     BotFather."*
+   - No token → *"Run `/plugin configure mila-telegram@mila` and paste the
+     token from BotFather (kept in secure storage), or `/telegram:configure
+     <token>` to save it in `.env`."*
    - Token set, policy is pairing, nobody allowed → *"DM your bot on
      Telegram. It replies with a code; approve with `/telegram:access pair
      <code>`."*

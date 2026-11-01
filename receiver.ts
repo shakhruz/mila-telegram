@@ -34,8 +34,13 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
 const ENV_FILE = join(STATE_DIR, '.env')
 
+// The plugin's user config (bot_token, kept by Claude Code in the system's secure credential store)
+// arrives as TELEGRAM_BOT_TOKEN_FROM_CONFIG and wins. Unset, Claude Code passes an empty string —
+// then the shell's TELEGRAM_BOT_TOKEN and ~/.claude/channels/telegram/.env work as before.
+const FROM_CONFIG = (process.env.TELEGRAM_BOT_TOKEN_FROM_CONFIG ?? '').trim()
+delete process.env.TELEGRAM_BOT_TOKEN_FROM_CONFIG
+if (FROM_CONFIG) process.env.TELEGRAM_BOT_TOKEN = FROM_CONFIG
 // Load ~/.claude/channels/telegram/.env into process.env. Real env wins.
-// Plugin-spawned servers don't get an env block — this is where the token lives.
 try {
   // Token is a credential — lock to owner. No-op on Windows (would need ACLs).
   chmodSync(ENV_FILE, 0o600)

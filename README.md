@@ -43,7 +43,7 @@ Read this before you put it on a machine that matters.
 
 **The event journal is a trust boundary.** The daemon writes events to a file and the session replays them; whatever can write that file speaks with the voice of Telegram. The journal and its directory are created `0600`/`0700`, and the bridge replays only an allowlist of two methods so a forged line cannot invoke arbitrary ones. Keep the state directory on a filesystem only you can write.
 
-**Your token lives in `~/.claude/channels/telegram/.env`** at `0600`, and is stripped from error output before anything is logged.
+**Your token lives in Claude Code's secure credential store** when you set it with `/plugin configure mila-telegram@mila` (the plugin's `bot_token` option, marked sensitive). Otherwise it comes from `TELEGRAM_BOT_TOKEN` in your shell or from `~/.claude/channels/telegram/.env` at `0600`, as before; the option, when set, wins. Either way it is stripped from error output before anything is logged.
 
 ## What it runs, sends and stores
 
@@ -53,7 +53,7 @@ Read this before you put it on a machine that matters.
   with exact versions and no install scripts; the plugin does not download anything at runtime.
 - **Processes:** `ps` once at start (to find a stale poller of the same bot); your own transcription command, only if you set
   `TELEGRAM_VOICE_TRANSCRIBE_CMD` (it receives the path of a downloaded voice note).
-- **Files:** everything under `~/.claude/channels/telegram/` (or `TELEGRAM_STATE_DIR`): `.env` with the bot token (600), `access.json`,
+- **Files:** everything under `~/.claude/channels/telegram/` (or `TELEGRAM_STATE_DIR`): `.env` with the bot token (600) if you use it, `access.json`,
   the inbound journal the daemon writes, downloaded attachments. One exception: the sign-in reminder reads `~/state/auth` and keeps
   its own timestamps in `~/state/login-self.json` (a Mila setup convention; without `~/state/auth` it does nothing).
 - **Outbound messages:** the assistant writes only to allowlisted chats, through the `reply` tool (see Security). The plugin itself, without
@@ -81,7 +81,7 @@ Read this before you put it on a machine that matters.
 /telegram:configure 123456789:AAHfiqksKZ8...
 ```
 
-This writes `TELEGRAM_BOT_TOKEN=...` to `~/.claude/channels/telegram/.env`. You can write that file yourself instead, or set the variable in your shell — the shell wins.
+This writes `TELEGRAM_BOT_TOKEN=...` to `~/.claude/channels/telegram/.env`. You can write that file yourself instead, or set the variable in your shell — the shell wins over the file. To keep the token out of files, use `/plugin configure mila-telegram@mila` instead: Claude Code stores it in your system's credential store, and it wins over both.
 
 > To run several bots on one machine, point `TELEGRAM_STATE_DIR` at a different directory per instance.
 
