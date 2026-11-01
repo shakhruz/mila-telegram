@@ -48,8 +48,9 @@ Read this before you put it on a machine that matters.
 ## What it runs, sends and stores
 
 - **Network at runtime:** only the Telegram Bot API (`https://api.telegram.org`) with your bot token. No telemetry.
-- **On start:** `bun install` fetches the two dependencies (`@modelcontextprotocol/sdk`, `grammy`) from the npm registry the first time and
-  whenever `bun.lock` changes, then runs `server.ts`.
+- **On start:** Claude Code runs `bun ${CLAUDE_PLUGIN_ROOT}/server.ts` — no wrapper script. The two dependencies
+  (`@modelcontextprotocol/sdk`, `grammy`) are installed by Claude Code itself when it installs or updates the plugin, from `bun.lock`
+  with exact versions and no install scripts; the plugin does not download anything at runtime.
 - **Processes:** `ps` once at start (to find a stale poller of the same bot); your own transcription command, only if you set
   `TELEGRAM_VOICE_TRANSCRIBE_CMD` (it receives the path of a downloaded voice note).
 - **Files:** everything under `~/.claude/channels/telegram/` (or `TELEGRAM_STATE_DIR`): `.env` with the bot token (600), `access.json`,
