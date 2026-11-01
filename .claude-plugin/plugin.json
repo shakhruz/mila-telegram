@@ -9,6 +9,8 @@
   },
   "homepage": "https://github.com/shakhruz/mila-telegram",
   "repository": "https://github.com/shakhruz/mila-telegram",
+  "privacyPolicyUrl": "https://milagpt.io/privacy",
+  "supportUrl": "https://github.com/shakhruz/mila-telegram/issues",
   "license": "Apache-2.0",
   "icon": "./.claude-plugin/icon.png",
   "keywords": [
