@@ -4,7 +4,7 @@ description: Manage Telegram channel access — approve pairings, edit allowlist
 user-invocable: true
 allowed-tools:
   - Read
-  - Write
+  - Write(~/.claude/channels/telegram/**)
   - Bash(ls *)
   - Bash(mkdir *)
   - Bash(echo *)
