@@ -43,7 +43,7 @@ Read this before you put it on a machine that matters.
 
 **The event journal is a trust boundary.** The daemon writes events to a file and the session replays them; whatever can write that file speaks with the voice of Telegram. The journal and its directory are created `0600`/`0700`, and the bridge replays only an allowlist of two methods so a forged line cannot invoke arbitrary ones. Keep the state directory on a filesystem only you can write.
 
-**Your token lives in Claude Code's secure credential store** when you set it with `/plugin configure mila-telegram@mila` (the plugin's `bot_token` option, marked sensitive). Otherwise it comes from `TELEGRAM_BOT_TOKEN` in your shell or from `~/.claude/channels/telegram/.env` at `0600`, as before; the option, when set, wins. Either way it is stripped from error output before anything is logged.
+**Claude Code keeps your token as a sensitive setting** (on macOS, in the Keychain) when you set it with `/plugin configure mila-telegram@mila` (the plugin's `bot_token` option, marked sensitive). Otherwise it comes from `TELEGRAM_BOT_TOKEN` in your shell or from `~/.claude/channels/telegram/.env` at `0600`, as before; the option, when set, wins. Either way it is stripped from error output before anything is logged.
 
 ## What it runs, sends and stores
 

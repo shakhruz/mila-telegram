@@ -34,7 +34,7 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
 const ENV_FILE = join(STATE_DIR, '.env')
 
-// The plugin's user config (bot_token, kept by Claude Code in the system's secure credential store)
+// The plugin's user config (bot_token, kept by Claude Code as a sensitive setting; on macOS in the Keychain)
 // arrives as TELEGRAM_BOT_TOKEN_FROM_CONFIG and wins. Unset, Claude Code passes an empty string —
 // then the shell's TELEGRAM_BOT_TOKEN and ~/.claude/channels/telegram/.env work as before.
 const FROM_CONFIG = (process.env.TELEGRAM_BOT_TOKEN_FROM_CONFIG ?? '').trim()

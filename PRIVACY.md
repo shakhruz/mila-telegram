@@ -33,7 +33,7 @@ The sign-in reminder reads `~/state/auth` and keeps its own timestamps in `~/sta
 does nothing.
 
 ## Credentials
-The bot token is a plugin setting marked sensitive, which Claude Code keeps in your system's secure credential store. For older
+The bot token is a plugin setting marked sensitive: Claude Code stores it as a sensitive setting (on macOS — in the Keychain). For older
 installs the plugin falls back to the local `.env` file so running assistants keep working. The token never leaves your
 machine except in requests to `api.telegram.org`, and the plugin does not log it.
 
@@ -43,8 +43,8 @@ plugin and delete `~/.claude/channels/telegram/`. Messages already delivered to 
 policy, and conversation history in Claude Code under yours and Anthropic's.
 
 ## Who can change access
-Only the person at the machine, from the terminal: pairing and allowlists (`/mila-telegram:access`). A Telegram message can
-never change access.
+Only the owner: from the terminal (`/mila-telegram:access` — pairing and allowlists), or by tapping approve on a join card the
+plugin sends to the owner's private chat when the bot is added to a group. Messages from other people can never change access.
 
 ## What the plugin sends on its own, without the model
 - a pairing code to someone who messages the bot, in pairing mode;

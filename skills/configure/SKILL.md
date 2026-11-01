@@ -18,7 +18,7 @@ policy. The server reads both files at boot.
 
 **Preferred place for the token:** the plugin's own setting. The user runs
 `/plugin configure mila-telegram@mila` (or fills the field when installing);
-Claude Code keeps it in the system's secure credential store and hands it to
+Claude Code keeps it as a sensitive setting (on macOS, in the Keychain) and hands it to
 the server. A token set there wins over `.env`. `.env` stays as the fallback
 for setups that already use it — mention both, don't move a working token.
 
