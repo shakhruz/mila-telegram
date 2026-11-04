@@ -106,7 +106,7 @@ The bot sends the owner a card in their private chat, colored (green/blue/red vi
 
 | Button | Effect |
 | --- | --- |
-| 🙋 Only me *(first button)* | `requireMention: true`, `allowFrom` = the owners — only the owner can call the bot, by @mention or a reply; other people's messages never reach the session. |
+| 🙋 Only me *(first button)* | `requireMention: true`, `ownerOnly: true` — only the current owners can call the bot, by @mention or a reply (a co-owner added later counts at once); other people's messages never reach the session. |
 | 💬 Reply to everyone | `requireMention: false` — the bot responds to every message (also requires disabling privacy mode, see below). |
 | 🏷 Anyone, by mention | `requireMention: true` — the bot responds to anyone in the group who @mentions it or replies to it. |
 | 👁 Observer | `observe: true` — every message in the chat is delivered to the session for context, but the bot only replies when it's actually addressed (@mention or a reply to its own message). Unaddressed messages arrive with `observe_only: "true"` in meta and a short note in the content telling the assistant not to reply — and get no typing indicator or ack reaction, since nothing is about to be sent. |

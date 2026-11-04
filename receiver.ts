@@ -20,7 +20,7 @@ import { z } from 'zod'
 import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './permission_policy'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
-import { groupPolicy, modeOf } from './group-mode.mjs'
+import { groupPolicy, groupSenderAllowed, modeOf } from './group-mode.mjs'
 import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
@@ -133,6 +133,8 @@ type GroupPolicy = {
   readOnly?: boolean
   /** Observer mode: every message in the chat is delivered for context, but the bot only replies when addressed. */
   observe?: boolean
+  /** «Only me»: only the current owners reach the session from this group. */
+  ownerOnly?: boolean
 }
 
 type Access = {
@@ -297,7 +299,7 @@ function regenChatsIndex(): void {
         const m = /^# (.+)$/m.exec(readFileSync(join(CHATS_DIR, `${id}.md`), 'utf8'))
         if (m) name = m[1]!
       } catch {}
-      const mode = MODE_LABEL[modeOf(g, ownersOf(a))]
+      const mode = MODE_LABEL[modeOf(g)]
       lines.push(`- ${name} · \`${id}\` · ${mode}`)
     }
     writeFileSync(join(STATE_DIR, 'CHATS.md'), lines.join('\n') + '\n', { mode: 0o600 })
@@ -389,9 +391,8 @@ function gate(ctx: Context): GateResult {
     const groupId = String(ctx.chat!.id)
     const policy = access.groups[groupId]
     if (!policy) return { action: 'drop' }
-    const groupAllowFrom = policy.allowFrom ?? []
     const requireMention = policy.requireMention ?? true
-    if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) {
+    if (!groupSenderAllowed(policy, senderId, ownersOf(access))) {
       return { action: 'drop' }
     }
     if (policy.observe) {
@@ -1149,9 +1150,10 @@ bot.command('channel_join', async ctx => {
           `requested by: ${joins[code].requestedByName} (${senderId})\n\n` +
           `How should it be connected?\n` +
           `The request expires in 1 hour. [${code}]` +
-          `\n\n💬 Reply to everyone — reads and replies in the chat as needed.\n` +
-          `🏷 Mention-only — only sees messages that address it (@mention or a reply to its own message).\n` +
-          `👁 Observer — reads the whole chat for context, but only replies when addressed.`,
+          `\n\n🙋 Only me — only you can call it here (@mention or a reply); other people's messages never reach it.\n` +
+          `🏷 Anyone, by mention — sees only messages that address it, from anyone in the chat.\n` +
+          `💬 Reply to everyone — reads every member's messages and replies as needed.\n` +
+          `👁 Observer — reads every member's messages for context, replies only when addressed.`,
           { reply_markup: kb },
         )
         delivered++
@@ -1480,7 +1482,7 @@ bot.on('callback_query:data', async ctx => {
       // deliberately OVERWRITES the mode — that is how the owner changes it,
       // with another /channel_join.
       const aAcc2 = loadAccess()
-      aAcc2.groups[aReq.chatId] = groupPolicy(mode, aAcc2.groups[aReq.chatId], ownersOf(aAcc2))
+      aAcc2.groups[aReq.chatId] = groupPolicy(mode, aAcc2.groups[aReq.chatId])
       saveAccess(aAcc2)
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
                 action: mode, by: aSender, via: data.startsWith('joinauto') ? 'auto-card' : 'join-command' })
@@ -2025,9 +2027,10 @@ async function onMyChatMember(ctx: any, deferred = false): Promise<void> {
           `added by: ${actorName} (${actorId})\n\n` +
           `How should it be connected?\n` +
           `The request expires in 1 hour. [${code}]` +
-          `\n\n💬 Reply to everyone — reads and replies in the chat as needed.\n` +
-          `🏷 Mention-only — only sees messages that address it (@mention or a reply to its own message).\n` +
-          `👁 Observer — reads the whole chat for context, but only replies when addressed.`,
+          `\n\n🙋 Only me — only you can call it here (@mention or a reply); other people's messages never reach it.\n` +
+          `🏷 Anyone, by mention — sees only messages that address it, from anyone in the chat.\n` +
+          `💬 Reply to everyone — reads every member's messages and replies as needed.\n` +
+          `👁 Observer — reads every member's messages for context, replies only when addressed.`,
           { reply_markup: kb },
         )
         delivered++
