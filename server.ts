@@ -20,6 +20,7 @@ import { z } from 'zod'
 import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './permission_policy'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
+import { groupPolicy, modeOf } from './group-mode.mjs'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
@@ -242,6 +243,7 @@ function loadAccess(): Access {
 const AUTH_LOG = join(STATE_DIR, 'auth-log.jsonl')
 const CHATS_DIR = join(STATE_DIR, 'chats')
 const MODE_LABEL: Record<string, string> = {
+  owner: '🙋 only the owner',
   all: '💬 reply to everyone',
   mention: '🏷 mention-only',
   read: '👁 listen only',
@@ -290,7 +292,7 @@ function regenChatsIndex(): void {
         const m = /^# (.+)$/m.exec(readFileSync(join(CHATS_DIR, `${id}.md`), 'utf8'))
         if (m) name = m[1]!
       } catch {}
-      const mode = g.readOnly ? MODE_LABEL.read : g.observe ? MODE_LABEL.observe : (g.requireMention ? MODE_LABEL.mention : MODE_LABEL.all)
+      const mode = MODE_LABEL[modeOf(g, ownersOf(a))]
       lines.push(`- ${name} · \`${id}\` · ${mode}`)
     }
     writeFileSync(join(STATE_DIR, 'CHATS.md'), lines.join('\n') + '\n', { mode: 0o600 })
@@ -1036,10 +1038,11 @@ bot.command('channel_join', async ctx => {
     // glance without reading the labels. grammy's InlineKeyboard builder
     // predates the `style` field, so this is a raw keyboard object instead.
     const kb = { inline_keyboard: [
-      [{ text: '💬 Reply to everyone', callback_data: `join:all:${code}`, style: 'success' },
-       { text: '🏷 Mention-only', callback_data: `join:mention:${code}`, style: 'primary' }],
-      [{ text: '👁 Observer', callback_data: `join:observe:${code}` },
-       { text: '❌ Reject', callback_data: `join:deny:${code}`, style: 'danger' }],
+      [{ text: '🙋 Only me', callback_data: `join:owner:${code}`, style: 'success' },
+       { text: '🏷 Anyone, by mention', callback_data: `join:mention:${code}`, style: 'primary' }],
+      [{ text: '💬 Reply to everyone', callback_data: `join:all:${code}` },
+       { text: '👁 Observer', callback_data: `join:observe:${code}` }],
+      [{ text: '❌ Reject', callback_data: `join:deny:${code}`, style: 'danger' }],
     ] } as any
     let delivered = 0
     for (const owner of ownersOf(access)) {
@@ -1336,7 +1339,7 @@ bot.on('callback_query:data', async ctx => {
     }
     return
   }
-  const am = /^join(?:auto)?:(allow|deny|all|mention|read|observe):([0-9a-f]{8})$/.exec(data)
+  const am = /^join(?:auto)?:(allow|deny|owner|all|mention|read|observe):([0-9a-f]{8})$/.exec(data)
   if (am) {
     // These buttons only live in the owner's private chat — double gate.
     if (ctx.chat?.type !== 'private') {
@@ -1376,17 +1379,13 @@ bot.on('callback_query:data', async ctx => {
     if (aAct !== 'deny') {
       // Mode comes from the button; legacy 'allow' (old cards) maps to the safe
       // mention-only.
-      const mode = aAct === 'all' ? 'all' : aAct === 'read' ? 'read' : aAct === 'observe' ? 'observe' : 'mention'
+      // 'owner' — the default: in a group only the owner(s) can call Mila (by mention); other people's words do not reach her.
+      const mode = aAct === 'all' ? 'all' : aAct === 'read' ? 'read' : aAct === 'observe' ? 'observe' : aAct === 'owner' ? 'owner' : 'mention'
       // read-modify-write immediately before the write. A repeat authorization
       // deliberately OVERWRITES the mode — that is how the owner changes it,
       // with another /channel_join.
       const aAcc2 = loadAccess()
-      aAcc2.groups[aReq.chatId] = {
-        requireMention: mode === 'mention',
-        allowFrom: aAcc2.groups[aReq.chatId]?.allowFrom ?? [],
-        ...(mode === 'read' ? { readOnly: true } : {}),
-        ...(mode === 'observe' ? { observe: true } : {}),
-      }
+      aAcc2.groups[aReq.chatId] = groupPolicy(mode, aAcc2.groups[aReq.chatId], ownersOf(aAcc2))
       saveAccess(aAcc2)
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
                 action: mode, by: aSender, via: data.startsWith('joinauto') ? 'auto-card' : 'join-command' })
@@ -1867,10 +1866,11 @@ async function onMyChatMember(ctx: any, deferred = false): Promise<void> {
     saveJoins(joins)
     // Colored buttons — see the /channel_join card above for why.
     const kb = { inline_keyboard: [
-      [{ text: '💬 Reply to everyone', callback_data: `joinauto:all:${code}`, style: 'success' },
-       { text: '🏷 Mention-only', callback_data: `joinauto:mention:${code}`, style: 'primary' }],
-      [{ text: '👁 Observer', callback_data: `joinauto:observe:${code}` },
-       { text: '❌ Reject', callback_data: `joinauto:deny:${code}`, style: 'danger' }],
+      [{ text: '🙋 Only me', callback_data: `joinauto:owner:${code}`, style: 'success' },
+       { text: '🏷 Anyone, by mention', callback_data: `joinauto:mention:${code}`, style: 'primary' }],
+      [{ text: '💬 Reply to everyone', callback_data: `joinauto:all:${code}` },
+       { text: '👁 Observer', callback_data: `joinauto:observe:${code}` }],
+      [{ text: '❌ Reject', callback_data: `joinauto:deny:${code}`, style: 'danger' }],
     ] } as any
     let delivered = 0
     for (const owner of access.allowFrom) {
