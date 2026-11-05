@@ -112,7 +112,7 @@ The bot sends the owner a card in their private chat, colored (green/blue/red vi
 | 🙋 Only me | `requireMention: true`, `ownerOnly: true` — only the current owners can call the bot, by @mention or a reply (a co-owner added later counts at once); other people's messages never reach the session. |
 | ❌ Reject | Drops the request. |
 
-The card and the button labels come in the owner's Telegram language (English, Russian, Uzbek, Chinese; English when unknown) — see [I18N.md](I18N.md).
+No mode is highlighted as the default; only Reject is red. The card and the button labels come in the owner's Telegram language (English, Russian, Uzbek, Chinese; English when unknown) — see [I18N.md](I18N.md).
 
 `👁 Listen only` (`readOnly: true`) still works for chats already configured that way — the bot hears the chat and forwards messages to the session, but replies into that chat are blocked mechanically: `reply` / `react` / `edit_message` refuse the chat_id, and the chat gets no announcement. It's no longer offered as a join-card button (superseded by Observer for most cases), but existing `readOnly` groups keep working, and you can still set it by hand in `access.json`.
 

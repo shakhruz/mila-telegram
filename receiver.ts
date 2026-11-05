@@ -1146,10 +1146,10 @@ bot.command('channel_join', async ctx => {
     // glance without reading the labels. grammy's InlineKeyboard builder
     // predates the `style` field, so this is a raw keyboard object instead.
     const kb = (lg: string) => ({ inline_keyboard: [
-      [{ text: t(lg, 'mode.owner'), callback_data: `join:owner:${code}`, style: 'success' },
-       { text: t(lg, 'mode.mention'), callback_data: `join:mention:${code}`, style: 'primary' }],
       [{ text: t(lg, 'mode.all'), callback_data: `join:all:${code}` },
-       { text: t(lg, 'mode.observe'), callback_data: `join:observe:${code}` }],
+       { text: t(lg, 'mode.mention'), callback_data: `join:mention:${code}` }],
+      [{ text: t(lg, 'mode.observe'), callback_data: `join:observe:${code}` },
+       { text: t(lg, 'mode.owner'), callback_data: `join:owner:${code}` }],
       [{ text: t(lg, 'mode.deny'), callback_data: `join:deny:${code}`, style: 'danger' }],
     ] }) as any
     let delivered = 0
@@ -1986,10 +1986,10 @@ async function onMyChatMember(ctx: any, deferred = false): Promise<void> {
     saveJoins(joins)
     // Colored buttons — see the /channel_join card above for why.
     const kb = (lg: string) => ({ inline_keyboard: [
-      [{ text: t(lg, 'mode.owner'), callback_data: `joinauto:owner:${code}`, style: 'success' },
-       { text: t(lg, 'mode.mention'), callback_data: `joinauto:mention:${code}`, style: 'primary' }],
       [{ text: t(lg, 'mode.all'), callback_data: `joinauto:all:${code}` },
-       { text: t(lg, 'mode.observe'), callback_data: `joinauto:observe:${code}` }],
+       { text: t(lg, 'mode.mention'), callback_data: `joinauto:mention:${code}` }],
+      [{ text: t(lg, 'mode.observe'), callback_data: `joinauto:observe:${code}` },
+       { text: t(lg, 'mode.owner'), callback_data: `joinauto:owner:${code}` }],
       [{ text: t(lg, 'mode.deny'), callback_data: `joinauto:deny:${code}`, style: 'danger' }],
     ] }) as any
     let delivered = 0
