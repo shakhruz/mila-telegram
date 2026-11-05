@@ -31,6 +31,12 @@ import { execFileSync } from 'child_process'
 import { join, extname, sep } from 'path'
 
 const STATE_DIR = process.env.TELEGRAM_STATE_DIR
+// TELEGRAM_SHARED_GROUP=1 (Mila Agent): the receiver runs as its own OS user and the session's user reads what it writes —
+// the journals 0640 (only the receiver writes them), other files 0660, folders setgid; otherwise owner-only, as before.
+const SHARED = process.env.TELEGRAM_SHARED_GROUP === '1'
+const FILE_MODE = SHARED ? 0o660 : 0o600      // cards, notes, settings the session may also write
+const JOURNAL_MODE = SHARED ? 0o640 : 0o600   // what only the receiver writes: inbound, presses, the authorization log
+const DIR_MODE = SHARED ? 0o2770 : 0o700
   ?? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'channels', 'telegram')
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
@@ -81,7 +87,7 @@ const EVENTS_FILE = join(INBOUND_DIR, 'events.jsonl')
 // session crashed (SIGKILL, terminal closed) its server.ts grandchild can
 // survive as an orphan and hold the slot forever, so every new session sees
 // 409 Conflict. Kill any stale holder before we start polling.
-mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+mkdirSync(STATE_DIR, { recursive: true, mode: DIR_MODE })
 try {
   const stale = parseInt(readFileSync(PID_FILE, 'utf8'), 10)
   if (stale > 1 && stale !== process.pid) {
@@ -288,8 +294,8 @@ const MODE_LABEL: Record<string, string> = {
 // brought it, the decision, and who decided.
 function logAuth(entry: Record<string, unknown>): void {
   try {
-    mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
-    appendFileSync(AUTH_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: 0o600 })
+    mkdirSync(STATE_DIR, { recursive: true, mode: DIR_MODE })
+    appendFileSync(AUTH_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: JOURNAL_MODE })
   } catch {}
 }
 
@@ -297,7 +303,7 @@ function logAuth(entry: Record<string, unknown>): void {
 // (purpose, people, summary) is the assistant's to maintain — its context for replies.
 function chatCard(chatId: string, title: string, mode: string, requestedByName: string): void {
   try {
-    mkdirSync(CHATS_DIR, { recursive: true, mode: 0o700 })
+    mkdirSync(CHATS_DIR, { recursive: true, mode: DIR_MODE })
     const p = join(CHATS_DIR, `${chatId}.md`)
     let txt = ''
     try { txt = readFileSync(p, 'utf8') } catch {}
@@ -308,7 +314,7 @@ function chatCard(chatId: string, title: string, mode: string, requestedByName: 
       // Re-authorization only updates the mode line — the card content stays.
       txt = txt.replace(/^mode: .*$/m, `mode: ${MODE_LABEL[mode] ?? mode}`)
     }
-    writeFileSync(p, txt, { mode: 0o600 })
+    writeFileSync(p, txt, { mode: FILE_MODE })
   } catch {}
   regenChatsIndex()
 }
@@ -328,7 +334,7 @@ function regenChatsIndex(): void {
       const mode = MODE_LABEL[modeOf(g)]
       lines.push(`- ${name} · \`${id}\` · ${mode}`)
     }
-    writeFileSync(join(STATE_DIR, 'CHATS.md'), lines.join('\n') + '\n', { mode: 0o600 })
+    writeFileSync(join(STATE_DIR, 'CHATS.md'), lines.join('\n') + '\n', { mode: FILE_MODE })
   } catch {}
 }
 
@@ -348,9 +354,9 @@ function assertAllowedChat(chat_id: string): void {
 
 function saveAccess(a: Access): void {
   if (STATIC) return
-  mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+  mkdirSync(STATE_DIR, { recursive: true, mode: DIR_MODE })
   const tmp = ACCESS_FILE + '.tmp.' + process.pid
-  writeFileSync(tmp, JSON.stringify(a, null, 2) + '\n', { mode: 0o600 })
+  writeFileSync(tmp, JSON.stringify(a, null, 2) + '\n', { mode: FILE_MODE })
   renameSync(tmp, ACCESS_FILE)
 }
 
@@ -849,7 +855,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
             sentIds.push(sent.message_id)
             if (last && cardRec) {
               try {
-                appendFileSync(CARDS_FILE, JSON.stringify({ ...cardRec, message_id: sent.message_id }) + '\n', { mode: 0o600 })
+                appendFileSync(CARDS_FILE, JSON.stringify({ ...cardRec, message_id: sent.message_id }) + '\n', { mode: FILE_MODE })
               } catch (e) { process.stderr.write(`buttons: card registry write failed: ${e}\n`) }
             }
           }
@@ -989,7 +995,7 @@ if (IS_DAEMON) {
   const { mkdirSync, appendFileSync } = await import('node:fs')
   // The seam is unauthenticated: whoever can write the file speaks with
   // Telegram's voice. So the directory and the journal stay owner-only.
-  mkdirSync(INBOUND_DIR, { recursive: true, mode: 0o700 })
+  mkdirSync(INBOUND_DIR, { recursive: true, mode: DIR_MODE })
   ;(mcp as any).notification = async (msg: any) => {
     const found: string[] = []
     const safe = maskSecrets(msg, found)
@@ -1001,7 +1007,7 @@ if (IS_DAEMON) {
         found.join(', ') + '\n')
     }
     const line = JSON.stringify({ ts: Date.now(), ...safe })
-    appendFileSync(EVENTS_FILE, line + '\n', { mode: 0o600 })
+    appendFileSync(EVENTS_FILE, line + '\n', { mode: JOURNAL_MODE })
   }
   process.stderr.write('telegram receiver: daemon mode, events -> ' + EVENTS_FILE + '\n')
 } else {
@@ -1088,7 +1094,7 @@ function loadJoins(): Record<string, JoinRequest> {
 
 function saveJoins(j: Record<string, JoinRequest>): void {
   const tmp = JOIN_FILE + '.tmp'
-  writeFileSync(tmp, JSON.stringify(j, null, 2) + '\n', { mode: 0o600 })
+  writeFileSync(tmp, JSON.stringify(j, null, 2) + '\n', { mode: FILE_MODE })
   renameSync(tmp, JOIN_FILE)
 }
 
@@ -1319,8 +1325,8 @@ function cardState(cardId: string): { card: CardRecord | null; used: CardRecord 
 
 function noteSuspiciousCardTap(entry: Record<string, unknown>): void {
   try {
-    mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
-    appendFileSync(join(STATE_DIR, 'suspicious.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: 0o600 })
+    mkdirSync(STATE_DIR, { recursive: true, mode: DIR_MODE })
+    appendFileSync(join(STATE_DIR, 'suspicious.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: JOURNAL_MODE })
   } catch {}
 }
 
@@ -1394,7 +1400,7 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
     appendFileSync(TAPS_FILE, JSON.stringify({
       card_id: cardId, used_ts: new Date().toISOString(), used_by: userId, data: value,
       chat_id: chatId, message_id: msgId, card_text: shown.slice(0, 500),
-    }) + '\n', { mode: 0o640 })
+    }) + '\n', { mode: JOURNAL_MODE })
   } catch {}
   await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.gotIt') }).catch(() => {})
 
