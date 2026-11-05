@@ -21,6 +21,7 @@ import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
 import { groupPolicy, groupSenderAllowed, modeOf } from './group-mode.mjs'
+import { langOf, pickLang, rememberLang, t } from './i18n.mjs'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
@@ -112,6 +113,15 @@ const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
 // token and puts it into the path — this process then only has a placeholder token.
 const API_ROOT = (process.env.TELEGRAM_API_ROOT || 'https://api.telegram.org').replace(/\/+$/, '')
 const bot = new Bot(TOKEN, { client: { apiRoot: API_ROOT } })
+// The language of people we write to: remembered (langs.json) only from private chats and from whoever added the bot to a
+// group or sent /channel_join — not from every member a group delivers.
+bot.use(async (ctx, next) => {
+  const f = ctx.from
+  if (f && !f.is_bot && (ctx.chat?.type === 'private' || ctx.myChatMember || /^\/channel_join\b/.test(ctx.message?.text ?? '')))
+    rememberLang(STATE_DIR, String(f.id), f.language_code)
+  await next()
+})
+const L = (ctx: Context) => pickLang(ctx.from?.language_code)
 // SUPERGROUP-1004: 400 "upgraded to a supergroup" -> migrate access, retry on the new id
 bot.api.config.use(supergroupTransformer(STATE_DIR, 'server'))
 let botUsername = ''
@@ -462,7 +472,7 @@ function checkApprovals(): void {
 
   for (const senderId of files) {
     const file = join(APPROVED_DIR, senderId)
-    void bot.api.sendMessage(senderId, "Paired! Say hi to Claude.").then(
+    void bot.api.sendMessage(senderId, t(langOf(STATE_DIR, senderId), 'pair.done')).then(
       () => rmSync(file, { force: true }),
       err => {
         process.stderr.write(`telegram channel: failed to send approval confirm: ${err}\n`)
@@ -619,15 +629,15 @@ mcp.setNotificationHandler(
       }, policy.ttlSeconds * 1000).unref?.()
     }
 
-    const text = `🔐 Permission: ${tool_name}`
-    const keyboard = new InlineKeyboard()
-      .text('See more', `perm:more:${request_id}`)
-      .text('✅ Allow', `perm:allow:${request_id}`)
-      .text('❌ Deny', `perm:deny:${request_id}`)
+    const card = (lg: string) => ({ text: t(lg, 'perm.title', { tool: tool_name }), keyboard: new InlineKeyboard()
+      .text(t(lg, 'perm.more'), `perm:more:${request_id}`)
+      .text(t(lg, 'perm.allow'), `perm:allow:${request_id}`)
+      .text(t(lg, 'perm.deny'), `perm:deny:${request_id}`) })
     // A permission card is the right to run a tool in someone else's session.
     // Only owners get one — not everyone who may send the bot a message.
     for (const chat_id of ownersOf(access)) {
-      void bot.api.sendMessage(chat_id, text, { reply_markup: keyboard }).catch(e => {
+      const c = card(langOf(STATE_DIR, chat_id))
+      void bot.api.sendMessage(chat_id, c.text, { reply_markup: c.keyboard }).catch(e => {
         process.stderr.write(`permission_request send to ${chat_id} failed: ${e}\n`)
       })
     }
@@ -993,7 +1003,7 @@ bot.command('channel_join', async ctx => {
     const chatType = ctx.chat?.type
     if (chatType !== 'group' && chatType !== 'supergroup') {
       if (chatType === 'private') {
-        await ctx.reply('/channel_join works inside the group you want to connect.').catch(() => {})
+        await ctx.reply(t(L(ctx), 'join.inGroupOnly')).catch(() => {})
       }
       return
     }
@@ -1005,12 +1015,12 @@ bot.command('channel_join', async ctx => {
     // silence — don't confirm the bot's presence in unconnected groups.
     if (!isOwner(access, senderId)) return
     if (STATIC) {
-      await ctx.reply('Static mode — the allowlist only changes by editing access.json on the host.').catch(() => {})
+      await ctx.reply(t(L(ctx), 'join.static')).catch(() => {})
       return
     }
     const chatId = String(ctx.chat!.id)
     if (access.groups[chatId]) {
-      await ctx.reply('🟢 Group is already connected.').catch(() => {})
+      await ctx.reply(t(L(ctx), 'join.already')).catch(() => {})
       return
     }
     const joins = loadJoins()
@@ -1018,11 +1028,11 @@ bot.command('channel_join', async ctx => {
     // Dedup: one live request per group.
     const existing = Object.entries(joins).find(([, r]) => r.chatId === chatId)
     if (existing) {
-      await ctx.reply('Request already sent to the owner — waiting for approval in their private chat.').catch(() => {})
+      await ctx.reply(t(L(ctx), 'join.pending')).catch(() => {})
       return
     }
     if (Object.keys(joins).length >= JOIN_MAX_PENDING) {
-      await ctx.reply('Too many open requests — clear them in the private chat and try again.').catch(() => {})
+      await ctx.reply(t(L(ctx), 'join.tooMany')).catch(() => {})
       return
     }
     const code = randomBytes(4).toString('hex') // 8 hex chars
@@ -1041,29 +1051,20 @@ bot.command('channel_join', async ctx => {
     // for the cautious default, red for the destructive one — readable at a
     // glance without reading the labels. grammy's InlineKeyboard builder
     // predates the `style` field, so this is a raw keyboard object instead.
-    const kb = { inline_keyboard: [
-      [{ text: '🙋 Only me', callback_data: `join:owner:${code}`, style: 'success' },
-       { text: '🏷 Anyone, by mention', callback_data: `join:mention:${code}`, style: 'primary' }],
-      [{ text: '💬 Reply to everyone', callback_data: `join:all:${code}` },
-       { text: '👁 Observer', callback_data: `join:observe:${code}` }],
-      [{ text: '❌ Reject', callback_data: `join:deny:${code}`, style: 'danger' }],
-    ] } as any
+    const kb = (lg: string) => ({ inline_keyboard: [
+      [{ text: t(lg, 'mode.owner'), callback_data: `join:owner:${code}`, style: 'success' },
+       { text: t(lg, 'mode.mention'), callback_data: `join:mention:${code}`, style: 'primary' }],
+      [{ text: t(lg, 'mode.all'), callback_data: `join:all:${code}` },
+       { text: t(lg, 'mode.observe'), callback_data: `join:observe:${code}` }],
+      [{ text: t(lg, 'mode.deny'), callback_data: `join:deny:${code}`, style: 'danger' }],
+    ] }) as any
     let delivered = 0
     for (const owner of ownersOf(access)) {
       try {
         await bot.api.sendMessage(
           owner,
-          `🔗 Group connection request\n` +
-          `"${title || 'untitled'}"\n` +
-          `chat_id: ${chatId}\n` +
-          `requested by: ${joins[code].requestedByName} (${senderId})\n\n` +
-          `How should it be connected?\n` +
-          `The request expires in 1 hour. [${code}]` +
-          `\n\n🙋 Only me — only you can call it here (@mention or a reply); other people's messages never reach it.\n` +
-          `🏷 Anyone, by mention — sees only messages that address it, from anyone in the chat.\n` +
-          `💬 Reply to everyone — reads every member's messages and replies as needed.\n` +
-          `👁 Observer — reads every member's messages for context, replies only when addressed.`,
-          { reply_markup: kb },
+          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: joins[code].requestedByName }),
+          { reply_markup: kb(langOf(STATE_DIR, owner)) },
         )
         delivered++
       } catch (err) {
@@ -1071,11 +1072,11 @@ bot.command('channel_join', async ctx => {
       }
     }
     if (delivered > 0) {
-      await ctx.reply('📨 Request sent to the owner privately. The group is connected only after they approve it there.').catch(() => {})
+      await ctx.reply(t(L(ctx), 'join.sent')).catch(() => {})
     } else {
       // The owner has never messaged the bot privately → Telegram forbids the bot
       // from opening that chat. The request still waits in join-requests.json.
-      await ctx.reply(`⚠️ Could not deliver the request to the owner's private chat. Request code: ${code}`).catch(() => {})
+      await ctx.reply(t(L(ctx), 'join.undelivered')).catch(() => {})
     }
   } catch (err) {
     process.stderr.write(`channel_join: handler error: ${scrubToken(err)}\n`)
@@ -1109,7 +1110,7 @@ bot.command('mila_leave', async ctx => {
   if (!allowed) return
 
   if (!access.groups[chatId]) {
-    await ctx.reply('This chat is not connected.').catch(() => {})
+    await ctx.reply(t(L(ctx), 'join.notConnected')).catch(() => {})
     return
   }
 
@@ -1125,11 +1126,7 @@ bot.command('mila_leave', async ctx => {
   })
   regenChatsIndex()
 
-  await ctx.reply(
-    'Disconnected. I no longer read this chat or reply in it.\n\n' +
-    'The chat card and the authorization-log entry are kept — history is not ' +
-    'erased. The bot owner can reconnect with /mila_join.'
-  ).catch(() => {})
+  await ctx.reply(t(L(ctx), 'leave.done')).catch(() => {})
 })
 
 bot.command('whoami', async ctx => {
@@ -1138,37 +1135,18 @@ bot.command('whoami', async ctx => {
   // know what they are talking to, whether or not they are on the allowlist.
   // Model-provider policy requires disclosing that the counterpart is an AI;
   // refusing to answer "who are you" would be exactly what that forbids.
-  const disclosure =
-    `I am an AI assistant, not a person.\n\n` +
-    `I run on Claude (Anthropic) and I am connected to the working session of ` +
-    `this chat's owner. I read this chat, reply, and carry out the tasks the ` +
-    `owner gives me.\n\n` +
-    `What I do not do: decide for people in medical, financial or legal ` +
-    `matters — there I prepare a draft and a human sends it.\n\n` +
-    `Questions or complaints go to the owner of this chat, who is responsible ` +
-    `for my work.`
+  const disclosure = t(L(ctx), 'whoami')
   await ctx.reply(disclosure).catch(() => {})
 })
 
 bot.command('start', async ctx => {
   if (!dmCommandGate(ctx)) return
-  await ctx.reply(
-    `This bot bridges Telegram to a Claude Code session.\n\n` +
-    `To pair:\n` +
-    `1. DM me anything — you'll get a 6-char code\n` +
-    `2. In Claude Code: /telegram:access pair <code>\n\n` +
-    `After that, DMs here reach that session.`
-  )
+  await ctx.reply(t(L(ctx), 'cmd.start'))
 })
 
 bot.command('help', async ctx => {
   if (!dmCommandGate(ctx)) return
-  await ctx.reply(
-    `Messages you send here route to a paired Claude Code session. ` +
-    `Text and photos are forwarded; replies and reactions come back.\n\n` +
-    `/start — pairing instructions\n` +
-    `/status — check your pairing state`
-  )
+  await ctx.reply(t(L(ctx), 'cmd.help'))
 })
 
 bot.command('status', async ctx => {
@@ -1178,20 +1156,18 @@ bot.command('status', async ctx => {
 
   if (access.allowFrom.includes(senderId)) {
     const name = ctx.from!.username ? `@${ctx.from!.username}` : senderId
-    await ctx.reply(`Paired as ${name}.`)
+    await ctx.reply(t(L(ctx), 'status.paired', { name }))
     return
   }
 
   for (const [code, p] of Object.entries(access.pending)) {
     if (p.senderId === senderId) {
-      await ctx.reply(
-        `Pending pairing — run in Claude Code:\n\n/telegram:access pair ${code}`
-      )
+      await ctx.reply(t(L(ctx), 'status.pending', { code }))
       return
     }
   }
 
-  await ctx.reply(`Not paired. Send me a message to get a pairing code.`)
+  await ctx.reply(t(L(ctx), 'status.not'))
 })
 
 // ─── Interactive buttons on the assistant's own messages ───
@@ -1275,14 +1251,14 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
 
   const { card, used } = cardState(cardId)
   if (!card) {
-    await ctx.answerCallbackQuery({ text: 'Button not found or expired.' }).catch(() => {})
+    await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.notFound') }).catch(() => {})
     return
   }
   const allow = (card.allow ?? []).map(String)
   if (allow.length > 0 && !allow.includes(userId)) {
     // Someone else's tap: a short refusal, a trace in suspicious.jsonl, and
     // NOTHING delivered to the session.
-    await ctx.answerCallbackQuery({ text: 'This button is not for you.' }).catch(() => {})
+    await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.notForYou') }).catch(() => {})
     noteSuspiciousCardTap({
       kind: 'card_tap_denied', card_id: cardId, chat_id: chatId,
       message_id: msgId, user: userName, user_id: userId, data: value,
@@ -1290,7 +1266,7 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
     return
   }
   if (used) {
-    await ctx.answerCallbackQuery({ text: 'Already handled.' }).catch(() => {})
+    await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.handled') }).catch(() => {})
     return
   }
   // Mark used BEFORE delivering — a race between two taps must not produce
@@ -1300,7 +1276,7 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
       card_id: cardId, used_ts: new Date().toISOString(), used_by: userId,
     }) + '\n', { mode: 0o600 })
   } catch {}
-  await ctx.answerCallbackQuery({ text: '✅ Got it' }).catch(() => {})
+  await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.gotIt') }).catch(() => {})
 
   const label = (card.buttons ?? []).flat().find(b => b.data === value)?.label
   void mcp.notification({
@@ -1348,13 +1324,13 @@ bot.on('callback_query:data', async ctx => {
   if (am) {
     // These buttons only live in the owner's private chat — double gate.
     if (ctx.chat?.type !== 'private') {
-      await ctx.answerCallbackQuery({ text: "Owner's private chat only." }).catch(() => {})
+      await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.ownerDmOnly') }).catch(() => {})
       return
     }
     const aAccess = loadAccess()
     const aSender = String(ctx.from.id)
     if (!isOwner(aAccess, aSender)) {
-      await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
+      await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.notAuthorized') }).catch(() => {})
       return
     }
     const [, aAct, aCode] = am
@@ -1363,9 +1339,9 @@ bot.on('callback_query:data', async ctx => {
     const aReq = joins[aCode!]
     const aMsg = ctx.callbackQuery.message
     if (!aReq) {
-      await ctx.answerCallbackQuery({ text: 'Already decided by another owner or expired.' }).catch(() => {})
+      await ctx.answerCallbackQuery({ text: t(L(ctx), 'join.decided') }).catch(() => {})
       if (aMsg && 'text' in aMsg && aMsg.text) {
-        await ctx.editMessageText(`${aMsg.text}\n\n⌛️ Already decided by another owner, or the request expired.`).catch(() => {})
+        await ctx.editMessageText(`${aMsg.text}\n\n${t(L(ctx), 'join.decided')}`).catch(() => {})
       }
       return
     }
@@ -1373,10 +1349,10 @@ bot.on('callback_query:data', async ctx => {
     // decides — the others get a notification, not a second live card (the
     // request is already deleted below, so a later tap hits the branch above).
     const aWho = ctx.from.first_name || (ctx.from.username ? `@${ctx.from.username}` : aSender)
-    const tellOthers = async (line: string) => {
+    const tellOthers = async (line: (o: string) => string) => {
       for (const o of ownersOf(aAccess)) {
         if (o === aSender) continue
-        await bot.api.sendMessage(o, line).catch(() => {})
+        await bot.api.sendMessage(o, line(o)).catch(() => {})
       }
     }
     delete joins[aCode!]
@@ -1395,22 +1371,22 @@ bot.on('callback_query:data', async ctx => {
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
                 action: mode, by: aSender, via: data.startsWith('joinauto') ? 'auto-card' : 'join-command' })
       chatCard(aReq.chatId, aReq.title, mode, aReq.requestedByName)
-      const label = MODE_LABEL[mode]!
+      const label = t(L(ctx), 'mode.' + mode)
       await ctx.answerCallbackQuery({ text: `✅ ${label}` }).catch(() => {})
       if (aMsg && 'text' in aMsg && aMsg.text) {
-        await ctx.editMessageText(`${aMsg.text}\n\n✅ Connected: ${label}`).catch(() => {})
+        await ctx.editMessageText(`${aMsg.text}\n\n${t(L(ctx), 'join.connected', { mode: label })}`).catch(() => {})
       }
-      await tellOthers(`✅ ${aWho} connected the bot to "${aReq.title || aReq.chatId}" — mode: ${label}.`)
+      await tellOthers(o => t(langOf(STATE_DIR, o), 'join.tellOthers', { who: aWho, title: aReq.title || t(langOf(STATE_DIR, o), 'join.untitled'), mode: t(langOf(STATE_DIR, o), 'mode.' + mode) }))
       // Listen-only is a silent presence: the chat is not notified.
       if (mode !== 'read') {
-        await bot.api.sendMessage(aReq.chatId, '🟢 Channel is active in this chat.').catch(() => {})
+        await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active')).catch(() => {})
       }
     } else {
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
                 action: 'deny', by: aSender, via: data.startsWith('joinauto') ? 'auto-card' : 'join-command' })
-      await ctx.answerCallbackQuery({ text: '❌ Rejected' }).catch(() => {})
+      await ctx.answerCallbackQuery({ text: t(L(ctx), 'join.rejected') }).catch(() => {})
       if (aMsg && 'text' in aMsg && aMsg.text) {
-        await ctx.editMessageText(`${aMsg.text}\n\n❌ Rejected`).catch(() => {})
+        await ctx.editMessageText(`${aMsg.text}\n\n${t(L(ctx), 'join.rejected')}`).catch(() => {})
       }
       await tellOthers(`❌ ${aWho} rejected connecting the bot to "${aReq.title || aReq.chatId}".`)
       // The chat is NOT notified — a rejection stays silent so the bot's
@@ -1426,7 +1402,7 @@ bot.on('callback_query:data', async ctx => {
   const access = loadAccess()
   const senderId = String(ctx.from.id)
   if (!isOwner(access, senderId)) {
-    await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
+    await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.notAuthorized') }).catch(() => {})
     return
   }
   const [, behavior, request_id] = m
@@ -1434,7 +1410,7 @@ bot.on('callback_query:data', async ctx => {
   if (behavior === 'more') {
     const details = pendingPermissions.get(request_id)
     if (!details) {
-      await ctx.answerCallbackQuery({ text: 'Details no longer available.' }).catch(() => {})
+      await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.detailsGone') }).catch(() => {})
       return
     }
     const { tool_name, description, input_preview } = details
@@ -1445,13 +1421,13 @@ bot.on('callback_query:data', async ctx => {
       prettyInput = input_preview
     }
     const expanded =
-      `🔐 Permission: ${tool_name}\n\n` +
+      `${t(L(ctx), 'perm.title', { tool: tool_name })}\n\n` +
       `tool_name: ${tool_name}\n` +
       `description: ${description}\n` +
       `input_preview:\n${prettyInput}`
     const keyboard = new InlineKeyboard()
-      .text('✅ Allow', `perm:allow:${request_id}`)
-      .text('❌ Deny', `perm:deny:${request_id}`)
+      .text(t(L(ctx), 'perm.allow'), `perm:allow:${request_id}`)
+      .text(t(L(ctx), 'perm.deny'), `perm:deny:${request_id}`)
     await ctx.editMessageText(expanded, { reply_markup: keyboard }).catch(() => {})
     await ctx.answerCallbackQuery().catch(() => {})
     return
@@ -1462,7 +1438,7 @@ bot.on('callback_query:data', async ctx => {
     params: { request_id, behavior },
   })
   pendingPermissions.delete(request_id)
-  const label = behavior === 'allow' ? '✅ Allowed' : '❌ Denied'
+  const label = t(L(ctx), behavior === 'allow' ? 'perm.allowed' : 'perm.denied')
   await ctx.answerCallbackQuery({ text: label }).catch(() => {})
   // Replace buttons with the outcome so the same request can't be answered
   // twice and the chat history shows what was chosen.
@@ -1652,10 +1628,7 @@ async function handleInbound(
   if (result.action === 'drop') return
 
   if (result.action === 'pair') {
-    const lead = result.isResend ? 'Still pending' : 'Pairing required'
-    await ctx.reply(
-      `${lead} — run in Claude Code:\n\n/telegram:access pair ${result.code}`,
-    )
+    await ctx.reply(t(L(ctx), result.isResend ? 'pair.pending' : 'pair.required', { code: result.code }))
     return
   }
 
@@ -1870,29 +1843,20 @@ async function onMyChatMember(ctx: any, deferred = false): Promise<void> {
     }
     saveJoins(joins)
     // Colored buttons — see the /channel_join card above for why.
-    const kb = { inline_keyboard: [
-      [{ text: '🙋 Only me', callback_data: `joinauto:owner:${code}`, style: 'success' },
-       { text: '🏷 Anyone, by mention', callback_data: `joinauto:mention:${code}`, style: 'primary' }],
-      [{ text: '💬 Reply to everyone', callback_data: `joinauto:all:${code}` },
-       { text: '👁 Observer', callback_data: `joinauto:observe:${code}` }],
-      [{ text: '❌ Reject', callback_data: `joinauto:deny:${code}`, style: 'danger' }],
-    ] } as any
+    const kb = (lg: string) => ({ inline_keyboard: [
+      [{ text: t(lg, 'mode.owner'), callback_data: `joinauto:owner:${code}`, style: 'success' },
+       { text: t(lg, 'mode.mention'), callback_data: `joinauto:mention:${code}`, style: 'primary' }],
+      [{ text: t(lg, 'mode.all'), callback_data: `joinauto:all:${code}` },
+       { text: t(lg, 'mode.observe'), callback_data: `joinauto:observe:${code}` }],
+      [{ text: t(lg, 'mode.deny'), callback_data: `joinauto:deny:${code}`, style: 'danger' }],
+    ] }) as any
     let delivered = 0
     for (const owner of access.allowFrom) {
       try {
         await bot.api.sendMessage(
           owner,
-          `➕ The bot was added to a new chat\n` +
-          `"${title || 'untitled'}" (${chatType})\n` +
-          `chat_id: ${chatId}\n` +
-          `added by: ${actorName} (${actorId})\n\n` +
-          `How should it be connected?\n` +
-          `The request expires in 1 hour. [${code}]` +
-          `\n\n🙋 Only me — only you can call it here (@mention or a reply); other people's messages never reach it.\n` +
-          `🏷 Anyone, by mention — sees only messages that address it, from anyone in the chat.\n` +
-          `💬 Reply to everyone — reads every member's messages and replies as needed.\n` +
-          `👁 Observer — reads every member's messages for context, replies only when addressed.`,
-          { reply_markup: kb },
+          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: actorName }),
+          { reply_markup: kb(langOf(STATE_DIR, owner)) },
         )
         delivered++
       } catch (err) {
@@ -1998,14 +1962,12 @@ void (async () => {
           attempt = 0
           botUsername = info.username
           process.stderr.write(`telegram channel: polling as @${info.username}\n`)
-          void bot.api.setMyCommands(
-            [
-              { command: 'start', description: 'Welcome and setup guide' },
-              { command: 'help', description: 'What this bot can do' },
-              { command: 'status', description: 'Check your pairing status' },
-            ],
-            { scope: { type: 'all_private_chats' } },
-          ).catch(() => {})
+          for (const lg of ['en', 'ru', 'uz', 'zh']) {   // the menu in the person's Telegram language; English is the default
+            void bot.api.setMyCommands(
+              ['start', 'help', 'status'].map(c => ({ command: c, description: t(lg, 'menu.' + c) })),
+              { scope: { type: 'all_private_chats' }, ...(lg === 'en' ? {} : { language_code: lg }) },
+            ).catch(() => {})
+          }
         },
       })
       return // bot.stop() was called — clean exit from the loop

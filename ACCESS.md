@@ -106,11 +106,13 @@ The bot sends the owner a card in their private chat, colored (green/blue/red vi
 
 | Button | Effect |
 | --- | --- |
-| 🙋 Only me *(first button)* | `requireMention: true`, `ownerOnly: true` — only the current owners can call the bot, by @mention or a reply (a co-owner added later counts at once); other people's messages never reach the session. |
-| 💬 Reply to everyone | `requireMention: false` — the bot responds to every message (also requires disabling privacy mode, see below). |
-| 🏷 Anyone, by mention | `requireMention: true` — the bot responds to anyone in the group who @mentions it or replies to it. |
+| 💬 Run the chat | `requireMention: false` — the bot reads everyone and replies when needed (also requires disabling privacy mode, see below). |
+| 🏷 By mention | `requireMention: true` — the bot responds to anyone in the group who @mentions it or replies to it. |
 | 👁 Observer | `observe: true` — every message in the chat is delivered to the session for context, but the bot only replies when it's actually addressed (@mention or a reply to its own message). Unaddressed messages arrive with `observe_only: "true"` in meta and a short note in the content telling the assistant not to reply — and get no typing indicator or ack reaction, since nothing is about to be sent. |
+| 🙋 Only me | `requireMention: true`, `ownerOnly: true` — only the current owners can call the bot, by @mention or a reply (a co-owner added later counts at once); other people's messages never reach the session. |
 | ❌ Reject | Drops the request. |
+
+The card and the button labels come in the owner's Telegram language (English, Russian, Uzbek, Chinese; English when unknown) — see [I18N.md](I18N.md).
 
 `👁 Listen only` (`readOnly: true`) still works for chats already configured that way — the bot hears the chat and forwards messages to the session, but replies into that chat are blocked mechanically: `reply` / `react` / `edit_message` refuse the chat_id, and the chat gets no announcement. It's no longer offered as a join-card button (superseded by Observer for most cases), but existing `readOnly` groups keep working, and you can still set it by hand in `access.json`.
 
