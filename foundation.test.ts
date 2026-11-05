@@ -17,6 +17,8 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
     { update_id: 1, message: { message_id: 10, date: 1, chat: { id: OWNER, type: 'private' }, from: { id: OWNER, is_bot: false, first_name: 'O' }, text: 'hi from owner' } },
     { update_id: 2, message: { message_id: 11, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: TEAM, is_bot: false, first_name: 'T', username: 'owner_lookalike' }, text: 'team task' } },
     { update_id: 3, message: { message_id: 12, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: OTHER, is_bot: false, first_name: 'Shahruz', username: 'shahruz' }, text: 'stranger' } },
+    { update_id: 5, message: { message_id: 13, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: OWNER, is_bot: false, first_name: 'O' }, text: 'owner replies',
+      reply_to_message: { message_id: 12, date: 1, chat: { id: GROUP, type: 'supergroup' }, from: { id: OTHER, is_bot: false, first_name: 'S' }, text: 'stranger' } } },
     { update_id: 4, callback_query: { id: 'cb1', chat_instance: 'x', data: 'card:c1:ok', from: { id: OWNER, is_bot: false, first_name: 'O' },
       message: { message_id: 50, date: 1, chat: { id: OWNER, type: 'private' }, text: 'Pack «X»\n#pack-x-1' } } },
   ]
@@ -45,7 +47,7 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
            TELEGRAM_API_ROOT: 'http://keeper/telegram', TELEGRAM_API_UNIX: sock, TELEGRAM_JOURNAL_DIR: join(dir, 'io'),
            TELEGRAM_SHARED_GROUP: '1' }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
   const ev = join(dir, 'io', 'events.jsonl')
-  for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (existsSync(ev) && readFileSync(ev, 'utf8').split('\n').length >= 4) break }
+  for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (existsSync(ev) && readFileSync(ev, 'utf8').split('\n').length >= 5) break }
   await Bun.sleep(300)
   p.kill(); await p.exited; srv.stop(true)
   const lines = readFileSync(ev, 'utf8').trim().split('\n').map(l => JSON.parse(l).params?.meta ?? {})
@@ -56,12 +58,13 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   // a stranger in a group — a first name like the owner's, or a line in access.json, changes nothing — never reaches the session:
   // not in events.jsonl, only in guests.jsonl (0600, the session's group cannot read it)
   expect(byUser(OTHER)).toBeUndefined()
-  expect(readFileSync(ev, 'utf8')).not.toContain('stranger')
+  expect(readFileSync(ev, 'utf8')).not.toContain('"stranger')   // nor quoted in the owner's reply
+  expect(lines.find((m: any) => m.reply_to_message_id === '12')?.reply_quote).toContain("a stranger's message")
   const gf = join(dir, 'io', 'guests.jsonl')
   const guest = JSON.parse(readFileSync(gf, 'utf8').trim().split('\n')[0])
   expect(guest.user_id).toBe(String(OTHER)); expect(guest.text).toBe('stranger'); expect(guest.chat_id).toBe(String(GROUP))
   expect(require('fs').statSync(gf).mode & 0o777).toBe(0o600)
-  expect(seen.filter(m => m === 'setMessageReaction' || m === 'sendChatAction').length).toBeLessThanOrEqual(2)   // owner + team only
+  expect(seen.filter(m => m === 'setMessageReaction' || m === 'sendChatAction').length).toBeLessThanOrEqual(3)   // owner ×2 + team only
   expect(existsSync(join(dir, 'inbound', 'events.jsonl'))).toBe(false)   // journals only in TELEGRAM_JOURNAL_DIR
   expect(require('fs').statSync(ev).mode & 0o777).toBe(0o640)             // the session's group reads, does not write
   const tap = JSON.parse(readFileSync(join(dir, 'io', 'taps.jsonl'), 'utf8').trim().split('\n')[0])

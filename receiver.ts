@@ -1788,6 +1788,16 @@ function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
 }
 
+/** A reply (by an owner or the team) to a stranger's message in a group: the session gets a placeholder, not the stranger's words. */
+function strangerQuoted(ctx: Context, access: Access, chatId: string): string | undefined {
+  const r: any = (ctx.message as any)?.reply_to_message
+  if (!r || (ctx.chat?.type !== 'group' && ctx.chat?.type !== 'supergroup')) return undefined
+  const own = r.from && !r.sender_chat && (r.from.id === ctx.me?.id || authorOf(access, chatId, String(r.from.id)) !== 'other')
+  if (own) return undefined
+  const n = String(r.text ?? r.caption ?? '').length
+  return `[a stranger's message, ${n} characters — not shown to the session; it is in the guests' journal]`
+}
+
 // How many strangers wrote in a group since the session last heard from it: the session gets the number, never the text.
 const GUESTS_SINCE = new Map<string, number>()
 
@@ -1945,7 +1955,7 @@ async function handleInbound(
           reply_to_message_id: String(ctx.message.reply_to_message.message_id),
           reply_to_user: ctx.message.reply_to_message.from?.username
             ?? String(ctx.message.reply_to_message.from?.id ?? ''),
-          reply_quote: replyQuote(ctx.message as any), // QUOTE-3000-1006
+          reply_quote: strangerQuoted(ctx, access, chat_id) ?? replyQuote(ctx.message as any), // QUOTE-3000-1006
         } : {}),
         ...(imagePath ? { image_path: imagePath } : {}),
         ...(attachment ? {

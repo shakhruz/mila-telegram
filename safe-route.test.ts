@@ -12,7 +12,11 @@ test('server.ts: a stranger in a group goes to guests.jsonl, not to the session;
   const msg = (id: number, uid: number, text: string, extra: any = {}) => ({ update_id: id, message: { message_id: id, date: 1,
     chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: uid, is_bot: false, first_name: 'X', ...extra }, text } })
   const updates = [msg(1, OTHER, 'stranger says hi', { first_name: 'Shahruz' }), msg(2, OWNER, 'owner task'), msg(3, TEAM, 'team task'),
-                   msg(4, 136 * 1000000 + 817688, 'channel post', { is_bot: true, first_name: 'Channel_Bot' })]
+                   msg(4, 136 * 1000000 + 817688, 'channel post', { is_bot: true, first_name: 'Channel_Bot' }),
+                   // the owner replies to the stranger, to the team member and to the bot: only the stranger's words are kept out
+                   { update_id: 5, message: { ...msg(5, OWNER, 'owner replies to stranger').message, reply_to_message: { message_id: 1, date: 1, chat: { id: GROUP, type: 'supergroup' }, from: { id: OTHER, is_bot: false, first_name: 'S' }, text: 'secret stranger words' } } },
+                   { update_id: 6, message: { ...msg(6, OWNER, 'owner replies to team').message, reply_to_message: { message_id: 3, date: 1, chat: { id: GROUP, type: 'supergroup' }, from: { id: TEAM, is_bot: false, first_name: 'T' }, text: 'team words' } } },
+                   { update_id: 7, message: { ...msg(7, OWNER, 'owner replies to bot').message, reply_to_message: { message_id: 9, date: 1, chat: { id: GROUP, type: 'supergroup' }, from: { id: 777, is_bot: true, first_name: 'M' }, text: 'bot words' } } }]
   let served = false
   const srv = Bun.serve({ port: 0, async fetch(req) {
     const method = new URL(req.url).pathname.split('/').pop()!
@@ -35,7 +39,7 @@ test('server.ts: a stranger in a group goes to guests.jsonl, not to the session;
   p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } }) + '\n')
   p.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
   const gf = join(dir, 'inbound', 'guests.jsonl')
-  for (let i = 0; i < 100; i++) { await Bun.sleep(100); if (out.join('').includes('team task') && existsSync(gf) && readFileSync(gf, 'utf8').includes('channel post')) break }
+  for (let i = 0; i < 100; i++) { await Bun.sleep(100); if (out.join('').includes('owner replies to bot') && existsSync(gf) && readFileSync(gf, 'utf8').includes('channel post')) break }
   await Bun.sleep(300)
   p.kill(); await p.exited; srv.stop(true)
   const all = out.join('')
@@ -44,6 +48,9 @@ test('server.ts: a stranger in a group goes to guests.jsonl, not to the session;
   // the session learns only how many strangers wrote since it last heard from the chat — the number, not the text
   const metaOf = (txt: string) => all.split('\n').filter(l => l.includes(txt)).map(l => JSON.parse(l).params.meta)[0]
   expect(metaOf('owner task').guests_since_last).toBe('1'); expect(metaOf('team task').guests_since_last).toBeUndefined()
+  expect(all).not.toContain('secret stranger words')
+  expect(metaOf('owner replies to stranger').reply_quote).toContain("a stranger's message, 21 characters")
+  expect(metaOf('owner replies to team').reply_quote).toBe('team words'); expect(metaOf('owner replies to bot').reply_quote).toBe('bot words')
   const g = readFileSync(gf, 'utf8').trim().split('\n').map(l => JSON.parse(l))
   expect(g.map((x: any) => x.text)).toEqual(['stranger says hi', 'channel post'])
   expect(statSync(gf).mode & 0o777).toBe(0o600)
