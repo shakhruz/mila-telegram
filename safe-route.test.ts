@@ -41,6 +41,9 @@ test('server.ts: a stranger in a group goes to guests.jsonl, not to the session;
   const all = out.join('')
   expect(all).toContain('owner task'); expect(all).toContain('team task')
   expect(all).not.toContain('stranger says hi'); expect(all).not.toContain('channel post')
+  // the session learns only how many strangers wrote since it last heard from the chat — the number, not the text
+  const metaOf = (txt: string) => all.split('\n').filter(l => l.includes(txt)).map(l => JSON.parse(l).params.meta)[0]
+  expect(metaOf('owner task').guests_since_last).toBe('1'); expect(metaOf('team task').guests_since_last).toBeUndefined()
   const g = readFileSync(gf, 'utf8').trim().split('\n').map(l => JSON.parse(l))
   expect(g.map((x: any) => x.text)).toEqual(['stranger says hi', 'channel post'])
   expect(statSync(gf).mode & 0o777).toBe(0o600)

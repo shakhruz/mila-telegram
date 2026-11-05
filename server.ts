@@ -1761,6 +1761,9 @@ function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
 }
 
+// How many strangers wrote in a group since the session last heard from it: the session gets the number, never the text.
+const GUESTS_SINCE = new Map<string, number>()
+
 async function askTeam(ctx: Context, access: Access): Promise<void> {
   const chatId = String(ctx.chat!.id), uid = String(ctx.from!.id)
   if (ctx.from!.is_bot || uid === '777000' || uid === '1087' + '968824' || (ctx.message as any)?.sender_chat) return   // bots, channels, anonymous admins: no card
@@ -1824,6 +1827,7 @@ async function handleInbound(
   if ((ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup')
       && authorOf(access, String(ctx.chat.id), String(ctx.from!.id)) === 'other') {
     guestEvent(ctx, text, access, attachment)
+    GUESTS_SINCE.set(String(ctx.chat.id), (GUESTS_SINCE.get(String(ctx.chat.id)) ?? 0) + 1)
     void askTeam(ctx, access)
     return
   }
@@ -1900,6 +1904,7 @@ async function handleInbound(
         user: from.username ?? String(from.id),
         user_id: String(from.id),
         from: authorOf(access, chat_id, String(from.id)),
+        ...(GUESTS_SINCE.get(chat_id) ? { guests_since_last: String(GUESTS_SINCE.get(chat_id)) } : {}),
         ...topicMeta(STATE_DIR, chat_id, ctx.message, from.username ?? String(from.id)),
         ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
         // Reply context: without it a reply arrives with no quote and the
@@ -1924,6 +1929,7 @@ async function handleInbound(
   }).catch(err => {
     process.stderr.write(`telegram channel: failed to deliver inbound to Claude: ${err}\n`)
   })
+  GUESTS_SINCE.delete(chat_id)
 }
 
 // Without this, any throw in a message handler stops polling permanently
