@@ -112,7 +112,11 @@ const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
 // TELEGRAM_API_ROOT: where Bot API calls go. Default Telegram; Mila Agent points it at its key keeper, which holds the real
 // token and puts it into the path — this process then only has a placeholder token.
 const API_ROOT = (process.env.TELEGRAM_API_ROOT || 'https://api.telegram.org').replace(/\/+$/, '')
-const bot = new Bot(TOKEN, { client: { apiRoot: API_ROOT } })
+// TELEGRAM_API_UNIX: reach the keeper over its unix socket, where it knows which OS user is calling (the poller may get
+// updates; the session may not).
+const API_UNIX = process.env.TELEGRAM_API_UNIX || ''
+const FETCH_OPT: Record<string, unknown> = API_UNIX ? { unix: API_UNIX } : {}
+const bot = new Bot(TOKEN, { client: { apiRoot: API_ROOT, baseFetchConfig: FETCH_OPT as any } })
 // The language of people we write to: remembered (langs.json) only from private chats and from whoever added the bot to a
 // group or sent /channel_join — not from every member a group delivers.
 bot.use(async (ctx, next) => {
@@ -143,6 +147,8 @@ type GroupPolicy = {
   observe?: boolean
   /** «Only me»: only the current owners reach the session from this group. */
   ownerOnly?: boolean
+  /** Team: people the owner marked in this group (Telegram ids); their tasks reach the session as from="team". */
+  team?: string[]
 }
 
 type Access = {
@@ -244,6 +250,13 @@ const BOOT_ACCESS: Access | null = STATIC
 // tool run in someone else's session.
 function ownersOf(access: { owners?: string[]; allowFrom: string[] }): string[] {
   return access.owners && access.owners.length ? access.owners : access.allowFrom
+}
+
+/** Who wrote, by Telegram id — never by name: the owner, a team member of this group, or someone else. */
+function authorOf(access: Access, chatId: string, userId: string): 'owner' | 'team' | 'other' {
+  if (isOwner(access, userId)) return 'owner'
+  if ((access.groups[chatId]?.team ?? []).map(String).includes(userId)) return 'team'
+  return 'other'
 }
 
 function isOwner(access: { owners?: string[]; allowFrom: string[] }, id: string): boolean {
@@ -858,7 +871,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const file = await bot.api.getFile(file_id)
         if (!file.file_path) throw new Error('Telegram returned no file_path — file may have expired')
         const url = `${API_ROOT}/file/bot${TOKEN}/${file.file_path}`
-        const res = await fetch(url)
+        const res = await fetch(url, FETCH_OPT as any)
         if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
         const buf = Buffer.from(await res.arrayBuffer())
         // file_path is from Telegram (trusted), but strip to safe chars anyway
@@ -1177,6 +1190,9 @@ bot.command('status', async ctx => {
 // inbound "[button] <label>" — the same gate/disable/deliver shape as the join
 // and permission cards above, generalized for the assistant's own replies.
 const CARDS_FILE = join(STATE_DIR, 'cards.jsonl')
+// Presses are written by the poller only, separately from the session's card registry: a press is what Telegram delivered
+// (who pressed, which button, the card's text as Telegram shows it), so a line the session forges in cards.jsonl is not a press.
+const TAPS_FILE = join(STATE_DIR, 'taps.jsonl')
 
 type CardButton = { label: string; data?: string; url?: string }
 type CardRecord = {
@@ -1194,7 +1210,13 @@ function cardState(cardId: string): { card: CardRecord | null; used: CardRecord 
       try { r = JSON.parse(line) } catch { continue }
       if (r.card_id !== cardId) continue
       if (r.used_ts) used = r
-      else card = r
+      else card = card ?? r
+    }
+  } catch {}
+  try {
+    for (const line of readFileSync(TAPS_FILE, 'utf8').split('\n')) {
+      if (!line.includes(cardId)) continue
+      try { const r = JSON.parse(line); if (r.card_id === cardId) used = used ?? r } catch {}
     }
   } catch {}
   return { card, used }
@@ -1212,6 +1234,7 @@ async function rawApi(method: string, params: Record<string, unknown>): Promise<
   // `disabled`/`style` fields, so its types would only get in the way here.
   try {
     const res = await fetch(`${API_ROOT}/bot${TOKEN}/${method}`, {
+      ...FETCH_OPT,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -1272,9 +1295,11 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
   // Mark used BEFORE delivering — a race between two taps must not produce
   // two decisions. answerCallbackQuery is mandatory or the client spins forever.
   try {
-    appendFileSync(CARDS_FILE, JSON.stringify({
-      card_id: cardId, used_ts: new Date().toISOString(), used_by: userId,
-    }) + '\n', { mode: 0o600 })
+    const shown = ctx.callbackQuery?.message && 'text' in ctx.callbackQuery.message ? String(ctx.callbackQuery.message.text ?? '') : ''
+    appendFileSync(TAPS_FILE, JSON.stringify({
+      card_id: cardId, used_ts: new Date().toISOString(), used_by: userId, data: value,
+      chat_id: chatId, message_id: msgId, card_text: shown.slice(0, 500),
+    }) + '\n', { mode: 0o640 })
   } catch {}
   await ctx.answerCallbackQuery({ text: t(L(ctx), 'btn.gotIt') }).catch(() => {})
 
@@ -1291,6 +1316,7 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
         ...(msgId != null ? { message_id: String(msgId) } : {}),
         user: userName,
         user_id: userId,
+        from: authorOf(loadAccess(), chatId, userId),
         callback_data: value,
         card_id: cardId,
         ts: new Date().toISOString(),
@@ -1464,7 +1490,7 @@ bot.on('message:photo', async ctx => {
       const file = await ctx.api.getFile(best.file_id)
       if (!file.file_path) return undefined
       const url = `${API_ROOT}/file/bot${TOKEN}/${file.file_path}`
-      const res = await fetch(url)
+      const res = await fetch(url, FETCH_OPT as any)
       const buf = Buffer.from(await res.arrayBuffer())
       const ext = file.file_path.split('.').pop() ?? 'jpg'
       const path = join(INBOX_DIR, `${Date.now()}-${best.file_unique_id}.${ext}`)
@@ -1518,7 +1544,7 @@ async function transcribeVoice(
       return '[voice, not transcribed: file >20MB]'
     }
     const url = `${API_ROOT}/file/bot${TOKEN}/${file.file_path}`
-    const res = await fetch(url)
+    const res = await fetch(url, FETCH_OPT as any)
     const buf = Buffer.from(await res.arrayBuffer())
     const ext = file.file_path.split('.').pop() ?? 'oga'
     const path = join(INBOX_DIR, `${Date.now()}-${file.file_unique_id}.${ext}`)
@@ -1706,6 +1732,7 @@ async function handleInbound(
         ...(msgId != null ? { message_id: String(msgId) } : {}),
         user: from.username ?? String(from.id),
         user_id: String(from.id),
+        from: authorOf(access, chat_id, String(from.id)),
         ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
         // Reply context: without it a reply arrives with no quote and the
         // session has to guess what it refers to. quote = the partial selection
