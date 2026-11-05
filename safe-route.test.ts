@@ -16,6 +16,8 @@ test('server.ts: a stranger in a group goes to guests.jsonl, not to the session;
                    // the owner replies to the stranger, to the team member and to the bot: only the stranger's words are kept out
                    { update_id: 5, message: { ...msg(5, OWNER, 'owner replies to stranger').message, reply_to_message: { message_id: 1, date: 1, chat: { id: GROUP, type: 'supergroup' }, from: { id: OTHER, is_bot: false, first_name: 'S' }, text: 'secret stranger words' } } },
                    { update_id: 6, message: { ...msg(6, OWNER, 'owner replies to team').message, reply_to_message: { message_id: 3, date: 1, chat: { id: GROUP, type: 'supergroup' }, from: { id: TEAM, is_bot: false, first_name: 'T' }, text: 'team words' } } },
+                   // a quote from another chat (external_reply + quote, no reply_to_message): nothing of it goes to the session
+                   { update_id: 8, message: { ...msg(8, OWNER, 'owner quotes another chat').message, external_reply: { origin: { type: 'user', date: 1, sender_user: { id: OTHER, is_bot: false, first_name: 'S' } } }, quote: { text: 'foreign quoted words', position: 0 } } },
                    { update_id: 7, message: { ...msg(7, OWNER, 'owner replies to bot').message, reply_to_message: { message_id: 9, date: 1, chat: { id: GROUP, type: 'supergroup' }, from: { id: 777, is_bot: true, first_name: 'M' }, text: 'bot words' } } }]
   let served = false
   const srv = Bun.serve({ port: 0, async fetch(req) {
@@ -49,6 +51,7 @@ test('server.ts: a stranger in a group goes to guests.jsonl, not to the session;
   const metaOf = (txt: string) => all.split('\n').filter(l => l.includes(txt)).map(l => JSON.parse(l).params.meta)[0]
   expect(metaOf('owner task').guests_since_last).toBe('1'); expect(metaOf('team task').guests_since_last).toBeUndefined()
   expect(all).not.toContain('secret stranger words')
+  expect(all).not.toContain('foreign quoted words'); expect(metaOf('owner quotes another chat').reply_quote).toBeUndefined()
   expect(metaOf('owner replies to stranger').reply_quote).toContain("a stranger's message, 21 characters")
   expect(metaOf('owner replies to team').reply_quote).toBe('team words'); expect(metaOf('owner replies to bot').reply_quote).toBe('bot words')
   const g = readFileSync(gf, 'utf8').trim().split('\n').map(l => JSON.parse(l))
