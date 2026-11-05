@@ -23,6 +23,7 @@ import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.m
 import { groupPolicy, groupSenderAllowed, modeOf } from './group-mode.mjs'
 import { isTopicRoot, topicMeta, topicsAll as topicsAllIn, topicsUpdate as topicsUpdateIn } from './topics.mjs'
 import { LIVE, langOf, pickLang, rememberLang, t } from './i18n.mjs'
+import { askOnce, setTeam, teamOf } from './team.mjs'
 import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
@@ -90,6 +91,9 @@ const EVENTS_FILE = JOURNAL_DIR ? join(JOURNAL_DIR, 'events.jsonl') : join(INBOU
 // A stranger's message in a group (not an owner, not on the group's team) goes here, never to the main session's journal.
 // 0600: in Mila Agent the session's group can read the other journals, not this one.
 const GUESTS_FILE = join(JOURNAL_DIR || INBOUND_DIR, 'guests.jsonl')
+// The groups' teams and «already asked» marks: the receiver's folder in Mila Agent (the session cannot write it).
+const TEAM_DIR = JOURNAL_DIR || STATE_DIR
+const TEAM_MODE = JOURNAL_MODE
 
 // Telegram allows exactly one getUpdates consumer per token. If a previous
 // session crashed (SIGKILL, terminal closed) its server.ts grandchild can
@@ -283,7 +287,7 @@ function ownersOf(access: { owners?: string[]; allowFrom: string[] }): string[] 
 /** Who wrote, by Telegram id — never by name: the owner, a team member of this group, or someone else. */
 function authorOf(access: Access, chatId: string, userId: string): 'owner' | 'team' | 'other' {
   if (isOwner(access, userId)) return 'owner'
-  if ((access.groups[chatId]?.team ?? []).map(String).includes(userId)) return 'team'
+  if (teamOf(TEAM_DIR, access, chatId, !JOURNAL_DIR).includes(userId)) return 'team'
   return 'other'
 }
 
@@ -1456,6 +1460,27 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
 // Security mirrors the text-reply path: allowFrom must contain the sender.
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
+  const tm = /^team:(add|skip|del):(-?[0-9]{1,20}):([0-9]{1,20})$/.exec(data)
+  if (tm) {
+    // Only the owner, only in a private chat: the team list never changes from a group.
+    if (ctx.chat?.type !== 'private' || !isOwner(loadAccess(), String(ctx.from.id))) {
+      await ctx.answerCallbackQuery({ text: t(L(ctx), ctx.chat?.type !== 'private' ? 'btn.ownerDmOnly' : 'btn.notAuthorized') }).catch(() => {})
+      return
+    }
+    const [, act, tChat, tUser] = tm
+    try { if (act !== 'skip') setTeam(TEAM_DIR, tChat!, tUser!, act === 'add', TEAM_MODE) } catch (err) {
+      process.stderr.write(`telegram: team not saved: ${err}\n`)
+      await ctx.answerCallbackQuery().catch(() => {}); return
+    }
+    const lg = L(ctx), msg = ctx.callbackQuery.message as any
+    const line = t(lg, act === 'add' ? 'team.added' : act === 'del' ? 'team.removed' : 'team.skipped')
+    const base = String(msg?.text ?? '').split('\n\n')[0]
+    await ctx.editMessageText(`${base}\n\n${line}`, act === 'add'
+      ? { reply_markup: { inline_keyboard: [[{ text: t(lg, 'team.btn.del'), callback_data: `team:del:${tChat}:${tUser}` }]] } as any }
+      : {}).catch(() => {})
+    await ctx.answerCallbackQuery({ text: line.slice(0, 190) }).catch(() => {})
+    return
+  }
   const cm = /^card:([A-Za-z0-9_-]{1,32}):([\s\S]*)$/.exec(data)
   if (cm) {
     try {
@@ -1763,6 +1788,23 @@ function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
 }
 
+async function askTeam(ctx: Context, access: Access): Promise<void> {
+  const chatId = String(ctx.chat!.id), uid = String(ctx.from!.id)
+  if (ctx.from!.is_bot || uid === '777000' || uid === '1087' + '968824' || (ctx.message as any)?.sender_chat) return   // bots, channels, anonymous admins: no card
+  let ask = false
+  try { ask = askOnce(TEAM_DIR, chatId, uid, TEAM_MODE) } catch (err) { process.stderr.write(`telegram: team ask not saved: ${err}\n`) }
+  if (!ask) return
+  const who = ctx.from!.username ? '@' + ctx.from!.username : (ctx.from!.first_name || uid).slice(0, 64)
+  const title = (ctx.chat && 'title' in ctx.chat && ctx.chat.title ? String(ctx.chat.title) : '').slice(0, 64)
+  for (const owner of ownersOf(access)) {
+    const lg = langOf(STATE_DIR, owner)
+    await bot.api.sendMessage(owner, t(lg, 'team.ask', { who, title: title || t(lg, 'join.untitled') }), { reply_markup: { inline_keyboard: [[
+      { text: t(lg, 'team.btn.add'), callback_data: `team:add:${chatId}:${uid}` },
+      { text: t(lg, 'team.btn.skip'), callback_data: `team:skip:${chatId}:${uid}` },
+    ]] } as any }).catch(err => process.stderr.write(`telegram: team card to owner failed: ${scrubToken(err)}\n`))
+  }
+}
+
 function guestEvent(ctx: Context, text: string, access: Access, attachment?: AttachmentMeta): void {
   const found: string[] = []
   const m: any = ctx.message ?? {}
@@ -1810,6 +1852,7 @@ async function handleInbound(
   if ((ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup')
       && authorOf(access, String(ctx.chat.id), String(ctx.from!.id)) === 'other') {
     guestEvent(ctx, text, access, attachment)
+    void askTeam(ctx, access)
     return
   }
   if (!observeOnly && await loginSelfHook(ctx, text)) return

@@ -53,6 +53,20 @@ const W = {
         '请求 1 小时内有效。',
   },
   'join.untitled': { en: 'untitled', ru: 'без названия', uz: 'nomsiz', zh: '未命名' },
+
+  // a stranger writes in a connected group: the owner decides in a private chat whether this person joins the group's team
+  'team.ask': {
+    en: '{who} writes in «{title}». Mila does not see these messages and does not answer. Add to this group\'s team? Then Mila sees their messages and does what they ask, as for you.',
+    ru: '{who} пишет в «{title}». Мила эти сообщения не видит и не отвечает. Добавить в команду этой группы? Тогда Мила будет видеть сообщения и выполнять просьбы, как ваши.',
+    uz: '{who} «{title}» guruhida yozmoqda. Mila bu xabarlarni ko‘rmaydi va javob bermaydi. Shu guruh jamoasiga qo‘shilsinmi? Shunda Mila xabarlarni ko‘radi va iltimoslarni sizniki kabi bajaradi.',
+    zh: '{who} 在「{title}」中发言。Mila 看不到这些消息，也不回复。加入该群的团队吗？加入后 Mila 会看到其消息并像对你一样执行请求。',
+  },
+  'team.btn.add':  { en: '✅ Add to the team', ru: '✅ В команду', uz: '✅ Jamoaga', zh: '✅ 加入团队' },
+  'team.btn.skip': { en: 'Not now', ru: 'Не сейчас', uz: 'Hozir emas', zh: '暂不' },
+  'team.btn.del':  { en: 'Remove from the team', ru: 'Убрать из команды', uz: 'Jamoadan chiqarish', zh: '移出团队' },
+  'team.added':    { en: '✅ On the team of this group.', ru: '✅ В команде этой группы.', uz: '✅ Shu guruh jamoasida.', zh: '✅ 已加入该群团队。' },
+  'team.skipped':  { en: 'Not added. Mila still does not see these messages.', ru: 'Не добавлено. Мила по-прежнему не видит эти сообщения.', uz: 'Qo‘shilmadi. Mila bu xabarlarni hali ham ko‘rmaydi.', zh: '未加入。Mila 仍看不到这些消息。' },
+  'team.removed':  { en: 'Removed from the team. Mila no longer sees these messages.', ru: 'Убрано из команды. Мила больше не видит эти сообщения.', uz: 'Jamoadan chiqarildi. Mila endi bu xabarlarni ko‘rmaydi.', zh: '已移出团队。Mila 不再看到这些消息。' },
   'join.sent':     { en: '📨 Request sent to the owner privately. The group is connected only after they approve it there.',
                      ru: '📨 Запрос отправлен владельцу в личку. Группа подключится только после его подтверждения.',
                      uz: '📨 So‘rov egasiga shaxsiy chatda yuborildi. Guruh faqat u tasdiqlagandan keyin ulanadi.',

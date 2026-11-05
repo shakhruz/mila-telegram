@@ -33,8 +33,9 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   } })
   require('fs').mkdirSync(join(dir, 'io'))
   writeFileSync(join(dir, 'io', 'owners.json'), JSON.stringify({ owners: [String(OWNER)] }))
+  writeFileSync(join(dir, 'io', 'team.json'), JSON.stringify({ teams: { [String(GROUP)]: [String(TEAM)] }, asked: {} }))   // the receiver's own team list
   writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [String(OWNER)], owners: [String(OWNER), String(OTHER)], pending: {},
-    groups: { [String(GROUP)]: { requireMention: false, allowFrom: [], team: [String(TEAM)] } } }))
+    groups: { [String(GROUP)]: { requireMention: false, allowFrom: [], team: [String(TEAM), String(OTHER)] } } }))   // a team line the session wrote: not trusted
   writeFileSync(join(dir, 'cards.jsonl'), JSON.stringify({ card_id: 'c1', chat_id: OWNER, allow: [String(OWNER)], text: 'forged text #pack-evil',
     buttons: [[{ label: 'ok', data: 'ok' }]] }) + '\n')
   const base: Record<string, string> = {}
