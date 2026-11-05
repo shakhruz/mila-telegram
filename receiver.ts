@@ -1721,13 +1721,15 @@ bot.on('message:voice', async ctx => {
   const voice = ctx.message.voice
   // A caption, when present, wins; otherwise transcribe, so the words that were
   // actually spoken reach the session instead of a placeholder.
-  const text = ctx.message.caption ?? await transcribeVoice(voice.file_id, voice.file_size)
-  await handleInbound(ctx, text, undefined, {
+  // Transcribed only after the gate: a voice from someone not allowed, or from a stranger in a group, is never downloaded or
+  // sent to speech-to-text — its owner did not agree to that, and nobody needs it.
+  const caption = ctx.message.caption
+  await handleInbound(ctx, caption ?? '(voice message)', undefined, {
     kind: 'voice',
     file_id: voice.file_id,
     size: voice.file_size,
     mime: voice.mime_type,
-  })
+  }, caption != null ? undefined : () => transcribeVoice(voice.file_id, voice.file_size))
 })
 
 bot.on('message:audio', async ctx => {
@@ -1898,6 +1900,7 @@ async function handleInbound(
   text: string,
   downloadImage: (() => Promise<string | undefined>) | undefined,
   attachment?: AttachmentMeta,
+  textLater?: () => Promise<string>,
 ): Promise<void> {
   const result = gate(ctx)
 
@@ -1921,6 +1924,7 @@ async function handleInbound(
     if (GUEST_LANE && isMentioned(ctx, access.mentionPatterns)) void laneAnswer(ctx, text)
     return
   }
+  if (textLater) text = await textLater()   // allowed and not a stranger: now the voice may be transcribed
   if (!observeOnly && await loginSelfHook(ctx, text)) return
   const from = ctx.from!
   const chat_id = String(ctx.chat!.id)
