@@ -61,6 +61,14 @@ const W = {
     uz: '{who} «{title}» guruhida yozmoqda. Mila bu xabarlarni ko‘rmaydi va javob bermaydi. Shu guruh jamoasiga qo‘shilsinmi? Shunda Mila xabarlarni ko‘radi va iltimoslarni sizniki kabi bajaradi.',
     zh: '{who} 在「{title}」中发言。Mila 看不到这些消息，也不回复。加入该群的团队吗？加入后 Mila 会看到其消息并像对你一样执行请求。',
   },
+  // the strangers' lane
+  'lane.passOn': { en: 'I will pass your question to the owner.', ru: 'Передам ваш вопрос владельцу.', uz: 'Savolingizni egasiga yetkazaman.', zh: '我会把你的问题转告给负责人。' },
+  'lane.cap': {
+    en: 'Today\'s limit of answers to people in your groups is reached — the rest of the day they get no answer. The limit protects your strangers\' key; it can be raised (LANE_DAY_ALL).',
+    ru: 'Сегодняшний предел ответов людям в ваших группах исчерпан — до конца дня они без ответа. Предел бережёт ваш ключ для чужих; его можно поднять (LANE_DAY_ALL).',
+    uz: 'Guruhlaringizdagi odamlarga bugungi javoblar chegarasi tugadi — kun oxirigacha ular javobsiz. Chegara begonalar uchun kalitingizni asraydi; uni oshirish mumkin (LANE_DAY_ALL).',
+    zh: '今天回复群内其他人的次数已达上限——今天剩余时间将不再回复。此上限用于保护你的外部密钥，可调高（LANE_DAY_ALL）。',
+  },
   'team.btn.add':  { en: '✅ Add to the team', ru: '✅ В команду', uz: '✅ Jamoaga', zh: '✅ 加入团队' },
   'team.btn.skip': { en: 'Not now', ru: 'Не сейчас', uz: 'Hozir emas', zh: '暂不' },
   'team.btn.del':  { en: 'Remove from the team', ru: 'Убрать из команды', uz: 'Jamoadan chiqarish', zh: '移出团队' },

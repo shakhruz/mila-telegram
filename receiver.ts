@@ -1803,28 +1803,45 @@ function strangerQuoted(ctx: Context, access: Access, chatId: string): string | 
 // addressed stranger's text and sends what comes back — text only, to the same chat, as a reply. No lane — strangers get no answer.
 const GUEST_LANE = process.env.TELEGRAM_GUEST_LANE || ''
 
-function laneAsk(text: string, chatId: string): Promise<string> {
+function laneAsk(text: string, chatId: string, userId: string): Promise<{ text: string, reason: string }> {
   return new Promise(resolve => {
     let buf = '', done = false
-    const end = (v: string) => { if (!done) { done = true; try { sock.destroy() } catch {} ; resolve(v) } }
+    const end = (v: { text: string, reason: string }) => { if (!done) { done = true; try { sock.destroy() } catch {} ; resolve(v) } }
     const sock = createConnection({ path: GUEST_LANE })
-    sock.setTimeout(120_000, () => end(''))
-    sock.on('error', () => end(''))
-    sock.on('connect', () => sock.write(JSON.stringify({ chat_id: chatId, text: text.slice(0, 2000) }) + '\n'))
+    const none = { text: '', reason: 'no answer' }
+    sock.setTimeout(120_000, () => end(none))
+    sock.on('error', () => end(none))
+    sock.on('connect', () => sock.write(JSON.stringify({ chat_id: chatId, user_id: userId, text: text.slice(0, 2000) }) + '\n'))
     sock.on('data', ch => {
       buf += ch.toString('utf8')
       if (buf.includes('\n')) {
-        try { const r = JSON.parse(buf.split('\n')[0]!); end(r && r.ok && typeof r.text === 'string' ? r.text : '') } catch { end('') }
+        try {
+          const r = JSON.parse(buf.split('\n')[0]!)
+          end(r && r.ok && typeof r.text === 'string' ? { text: r.text, reason: '' } : { text: '', reason: String(r?.reason ?? 'no answer') })
+        } catch { end(none) }
       }
     })
-    sock.on('close', () => end(''))
+    sock.on('close', () => end(none))
   })
+}
+
+let laneCapDay = ''
+async function laneCapNotice(): Promise<void> {
+  const day = new Date().toISOString().slice(0, 10)
+  if (laneCapDay === day) return
+  laneCapDay = day
+  for (const o of ownersOf(loadAccess())) {
+    await bot.api.sendMessage(o, t(langOf(STATE_DIR, o), 'lane.cap')).catch(() => {})
+  }
 }
 
 async function laneAnswer(ctx: Context, text: string): Promise<void> {
   const chatId = String(ctx.chat!.id), m: any = ctx.message ?? {}
   if (!String(text).trim()) return
-  const out = (await laneAsk(String(text), chatId)).slice(0, 1500)
+  const r = await laneAsk(String(text), chatId, String(ctx.from!.id))
+  if (r.reason === 'cap') { void laneCapNotice(); return }   // the day's ceiling on the strangers' key: silence in the group, a line to the owner
+  // the lane's answer had a link that is not in the owner's knowledge, or an @mention: not published — a neutral line instead
+  const out = r.reason === 'filtered' ? t(pickLang(ctx.from?.language_code), 'lane.passOn') : r.text.slice(0, 1500)
   if (!out) return
   await bot.api.sendMessage(chatId, out, {
     ...(m.message_id != null ? { reply_parameters: { message_id: m.message_id, allow_sending_without_reply: true } } : {}),

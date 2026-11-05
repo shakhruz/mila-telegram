@@ -13,7 +13,8 @@ test('lane: addressed stranger → lane → answer in the same chat; unaddressed
   const api = join(dir, 'api.sock'), laneSock = join(dir, 'lane.sock')
   const g = (id: number, text: string, entities?: any[]) => ({ update_id: id, message: { message_id: id, date: 1,
     chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: OTHER, is_bot: false, first_name: 'S' }, text, ...(entities ? { entities } : {}) } })
-  const updates = [g(1, 'just chatting'), g(2, '@m_bot how much?', [{ type: 'mention', offset: 0, length: 6 }])]
+  const M = [{ type: 'mention', offset: 0, length: 6 }]
+  const updates = [g(1, 'just chatting'), g(2, '@m_bot how much?', M), g(3, '@m_bot give a link', M), g(4, '@m_bot again', M), g(5, '@m_bot more', M)]
   const sent: any[] = []; let served = false
   const srv = Bun.serve({ unix: api, async fetch(req) {
     const method = new URL(req.url).pathname.split('/').pop()!
@@ -28,7 +29,11 @@ test('lane: addressed stranger → lane → answer in the same chat; unaddressed
   } })
   const asked: string[] = []
   const lane = Bun.listen({ unix: laneSock, socket: {
-    data(s, d) { asked.push(d.toString()); s.write(JSON.stringify({ ok: true, text: 'Lane says hi' }) + '\n'); s.end() },
+    data(s, d) {
+      asked.push(d.toString())
+      const r = [{ ok: true, text: 'Lane says hi' }, { ok: false, reason: 'filtered' }, { ok: false, reason: 'cap' }, { ok: false, reason: 'cap' }][asked.length - 1]
+      s.write(JSON.stringify(r) + '\n'); s.end()
+    },
   } })
   mkdirSync(join(dir, 'io'))
   writeFileSync(join(dir, 'io', 'owners.json'), JSON.stringify({ owners: [String(OWNER)] }))
@@ -40,14 +45,18 @@ test('lane: addressed stranger → lane → answer in the same chat; unaddressed
     env: { ...base, RECEIVER_DAEMON: '1', TELEGRAM_STATE_DIR: dir, TELEGRAM_BOT_TOKEN: '1234' + '5678:' + 'x'.repeat(35),
            TELEGRAM_API_ROOT: 'http://keeper/telegram', TELEGRAM_API_UNIX: api, TELEGRAM_JOURNAL_DIR: join(dir, 'io'),
            TELEGRAM_SHARED_GROUP: '1', TELEGRAM_GUEST_LANE: laneSock }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
-  for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (sent.some(b => b.text === 'Lane says hi')) break }
+  for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (asked.length >= 4 && sent.some(b => /limit of answers/.test(String(b.text)))) break }
   await Bun.sleep(300)
   p.kill(); await p.exited; srv.stop(true); lane.stop(true)
-  expect(asked.length).toBe(1)                                                   // only the addressed one
-  expect(JSON.parse(asked[0]!.trim())).toEqual({ chat_id: String(GROUP), text: '@m_bot how much?' })
+  expect(asked.length).toBe(4)                                                   // only the addressed ones
+  expect(JSON.parse(asked[0]!.trim())).toEqual({ chat_id: String(GROUP), user_id: String(OTHER), text: '@m_bot how much?' })
   const ans = sent.find(b => b.text === 'Lane says hi')
   expect(String(ans.chat_id)).toBe(String(GROUP)); expect(ans.reply_parameters?.message_id).toBe(2)
-  expect(sent.filter(b => String(b.chat_id) === String(GROUP)).length).toBe(1)  // nothing else to the group
+  // a filtered answer (a link not in the owner's knowledge, an @mention): a neutral line instead, as a reply
+  const pass = sent.filter(b => String(b.chat_id) === String(GROUP) && b.text !== 'Lane says hi')
+  expect(pass.length).toBe(1); expect(pass[0].reply_parameters?.message_id).toBe(3); expect(pass[0].text).toMatch(/pass your question/)
+  // the day's ceiling: silence in the group, one line to the owner (not one per message)
+  expect(sent.filter(b => String(b.chat_id) === String(OWNER) && /limit of answers/.test(b.text)).length).toBe(1)
   const ev = join(dir, 'io', 'events.jsonl')
   expect(existsSync(ev) ? readFileSync(ev, 'utf8') : '').not.toContain('how much')   // the session never sees it
   rmSync(dir, { recursive: true, force: true })
