@@ -25,25 +25,25 @@ const W = {
 
   // the card to the owner when the bot is added to a group or /channel_join is sent
   'join.card': {
-    en: '🔗 Mila was added to the group «{title}» by {who}.\nHow should she work there?\n\n' +
+    en: '🔗 Mila was added to the group «{title}». Added by: {who}.\nHow should she work there?\n\n' +
         '💬 Run the chat — reads everyone and replies when needed.\n' +
         '🏷 By mention — sees only messages that address her, from anyone.\n' +
         '👁 Observer — reads everyone for context, replies only when addressed.\n' +
         '🙋 Only me — only you can call her there; other people\'s messages do not reach her.\n\n' +
         'The request is valid for 1 hour.',
-    ru: '🔗 {who} добавил(а) Милу в группу «{title}».\nКак ей там работать?\n\n' +
+    ru: '🔗 Милу добавили в группу «{title}». Добавил: {who}.\nКак ей там работать?\n\n' +
         '💬 Вести чат — читает всех и отвечает, когда нужно.\n' +
         '🏷 По упоминанию — видит только сообщения, где к ней обратились, от любого участника.\n' +
         '👁 Наблюдатель — читает всех для понимания, отвечает только когда к ней обратились.\n' +
         '🙋 Только мне — звать её там можете только вы; сообщения других до неё не доходят.\n\n' +
         'Запрос действует 1 час.',
-    uz: '🔗 {who} Milani «{title}» guruhiga qo‘shdi.\nU yerda qanday ishlasin?\n\n' +
+    uz: '🔗 Mila «{title}» guruhiga qo‘shildi. Qo‘shgan: {who}.\nU yerda qanday ishlasin?\n\n' +
         '💬 Chatni yuritish — hammani o‘qiydi va kerak bo‘lganda javob beradi.\n' +
         '🏷 Eslatilganda — faqat unga murojaat qilingan xabarlarni ko‘radi, istalgan ishtirokchidan.\n' +
         '👁 Kuzatuvchi — tushunish uchun hammani o‘qiydi, faqat murojaat qilinganda javob beradi.\n' +
         '🙋 Faqat menga — u yerda uni faqat siz chaqira olasiz; boshqalarning xabarlari unga yetib bormaydi.\n\n' +
         'So‘rov 1 soat amal qiladi.',
-    zh: '🔗 {who} 把 Mila 加入了群组「{title}」。\n她在那里应该如何工作？\n\n' +
+    zh: '🔗 Mila 已被加入群组「{title}」。添加者：{who}。\n她在那里应该如何工作？\n\n' +
         '💬 管理群聊 — 阅读所有人的消息，需要时回复。\n' +
         '🏷 被提及时 — 只看到任何成员对她说的消息。\n' +
         '👁 旁观 — 阅读所有人的消息以了解情况，只在被提及时回复。\n' +
@@ -76,8 +76,8 @@ const W = {
   'join.rejected': { en: '❌ Rejected', ru: '❌ Отказано', uz: '❌ Rad etildi', zh: '❌ 已拒绝' },
   'join.decided':  { en: '⌛️ Already decided by another owner, or the request expired.', ru: '⌛️ Уже решено другим владельцем или запрос истёк.',
                      uz: '⌛️ Boshqa ega allaqachon hal qilgan yoki so‘rov muddati tugagan.', zh: '⌛️ 已由其他所有者处理，或请求已过期。' },
-  'join.tellOthers': { en: '✅ {who} connected Mila to «{title}» — mode: {mode}.', ru: '✅ {who} подключил(а) Милу к «{title}» — режим: {mode}.',
-                       uz: '✅ {who} Milani «{title}» ga uladi — rejim: {mode}.', zh: '✅ {who} 已将 Mila 连接到「{title}」— 模式：{mode}。' },
+  'join.tellOthers': { en: '✅ Mila is connected to «{title}» — mode: {mode}. Connected by: {who}.', ru: '✅ Мила подключена к «{title}» — режим: {mode}. Подключил: {who}.',
+                       uz: '✅ Mila «{title}» ga ulandi — rejim: {mode}. Ulagan: {who}.', zh: '✅ Mila 已连接到「{title}」— 模式：{mode}。连接者：{who}。' },
   'join.notConnected': { en: 'This chat is not connected.', ru: 'Этот чат не подключён.', uz: 'Bu chat ulanmagan.', zh: '此聊天未连接。' },
   'leave.done': { en: 'Disconnected. I no longer read this chat or reply in it.\n\nThe chat card and the log entry are kept. The bot owner can reconnect by adding me again.',
                   ru: 'Отключилась. Больше не читаю этот чат и не отвечаю в нём.\n\nКарточка чата и запись в журнале остаются. Владелец может подключить меня снова, добавив в группу.',
