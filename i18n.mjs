@@ -7,11 +7,13 @@ import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const LANGS = ['en', 'ru', 'uz', 'zh']
+// Chinese goes out only after a native speaker's check: until then a Chinese-speaking person gets English.
+export const LIVE = ['en', 'ru', 'uz']
 
-/** «ru-RU», «uz», «zh-hans» → our code; anything else → 'en'. */
+/** «ru-RU», «uz» → our code; anything else (and Chinese until checked) → 'en'. */
 export function pickLang(code) {
   const c = String(code || '').toLowerCase().slice(0, 2)
-  return LANGS.includes(c) ? c : 'en'
+  return LIVE.includes(c) ? c : 'en'
 }
 
 const W = {

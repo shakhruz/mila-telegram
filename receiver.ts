@@ -21,7 +21,7 @@ import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
 import { groupPolicy, groupSenderAllowed, modeOf } from './group-mode.mjs'
-import { langOf, pickLang, rememberLang, t } from './i18n.mjs'
+import { LIVE, langOf, pickLang, rememberLang, t } from './i18n.mjs'
 import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
@@ -2027,7 +2027,7 @@ void (async () => {
           attempt = 0
           botUsername = info.username
           process.stderr.write(`telegram channel: polling as @${info.username}\n`)
-          for (const lg of ['en', 'ru', 'uz', 'zh']) {   // the menu in the person's Telegram language; English is the default
+          for (const lg of LIVE) {   // the menu in the person's Telegram language; English is the default
             void bot.api.setMyCommands(
               ['start', 'help', 'status'].map(c => ({ command: c, description: t(lg, 'menu.' + c) })),
               { scope: { type: 'all_private_chats' }, ...(lg === 'en' ? {} : { language_code: lg }) },

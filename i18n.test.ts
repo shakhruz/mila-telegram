@@ -15,8 +15,8 @@ test('every key has all four languages, and placeholders match English', () => {
   }
 })
 
-test('language: ru-RU → ru, uz → uz, zh-hans → zh, de / empty → en (fallback)', () => {
-  expect(pickLang('ru-RU')).toBe('ru'); expect(pickLang('uz')).toBe('uz'); expect(pickLang('zh-hans')).toBe('zh')
+test('language: ru-RU → ru, uz → uz, zh-hans → en until checked, de / empty → en (fallback)', () => {
+  expect(pickLang('ru-RU')).toBe('ru'); expect(pickLang('uz')).toBe('uz'); expect(pickLang('zh-hans')).toBe('en')   // Chinese waits for a native speaker's check
   expect(pickLang('de')).toBe('en'); expect(pickLang(undefined)).toBe('en')
   expect(t('de', 'mode.all')).toBe(t('en', 'mode.all'))
   expect(t('ru', 'join.connected', { mode: 'X' })).toBe('✅ Подключено: X')
