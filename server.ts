@@ -631,8 +631,8 @@ mcp.setNotificationHandler(
 
     const card = (lg: string) => ({ text: t(lg, 'perm.title', { tool: tool_name }), keyboard: new InlineKeyboard()
       .text(t(lg, 'perm.more'), `perm:more:${request_id}`)
-      .text(t(lg, 'perm.allow'), `perm:allow:${request_id}`)
-      .text(t(lg, 'perm.deny'), `perm:deny:${request_id}`) })
+      .text(t(lg, 'perm.allow'), `perm:allow:${request_id}`).style('success')
+      .text(t(lg, 'perm.deny'), `perm:deny:${request_id}`).style('danger') })
     // A permission card is the right to run a tool in someone else's session.
     // Only owners get one — not everyone who may send the bot a message.
     for (const chat_id of ownersOf(access)) {
@@ -1426,8 +1426,8 @@ bot.on('callback_query:data', async ctx => {
       `description: ${description}\n` +
       `input_preview:\n${prettyInput}`
     const keyboard = new InlineKeyboard()
-      .text(t(L(ctx), 'perm.allow'), `perm:allow:${request_id}`)
-      .text(t(L(ctx), 'perm.deny'), `perm:deny:${request_id}`)
+      .text(t(L(ctx), 'perm.allow'), `perm:allow:${request_id}`).style('success')
+      .text(t(L(ctx), 'perm.deny'), `perm:deny:${request_id}`).style('danger')
     await ctx.editMessageText(expanded, { reply_markup: keyboard }).catch(() => {})
     await ctx.answerCallbackQuery().catch(() => {})
     return
