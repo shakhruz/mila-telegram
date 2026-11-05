@@ -18,7 +18,7 @@ This is an extended fork of the [official Telegram channel plugin](https://githu
 
 **Co-owners.** With more than one owner on `owners`, a join card goes to all of them, and whoever taps first decides. The rest get a notification ("✅ *name* connected the bot to *chat* — mode: …", or the rejection equivalent) instead of a live card, so two owners can never approve the same request twice; a second tap on an already-decided card gets "Already decided by another owner or expired."
 
-**Interactive buttons.** The join card's buttons are colored (green for the everyday choice, blue for the cautious default, red for reject) instead of plain text, so the right one is readable at a glance. The `reply` tool also takes a `buttons` param: a `url` button opens a link, and a `choice` button comes back into the session as an inbound `[button] <label>` message when tapped — good for an A/B choice or a confirm/cancel that doesn't need a full reply typed out. A `choice` card goes dead after the first tap; a plain link button never needs to.
+**Interactive buttons.** On the join card only Reject is red — no mode is highlighted as the default; on a tool-permission card Allow is green and Deny is red. The bot's own words come in the owner's Telegram language (English, Russian, Uzbek; English when unknown).
 
 **Voice transcription.** Voice notes are handed to a transcription command of your choice (set `TELEGRAM_VOICE_TRANSCRIBE_CMD`), and the text reaches the assistant along with the audio. Unset means voice notes simply pass through untranscribed — no default, no vendor.
 
