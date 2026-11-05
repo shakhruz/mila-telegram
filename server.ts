@@ -21,6 +21,7 @@ import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
 import { groupPolicy, groupSenderAllowed, modeOf } from './group-mode.mjs'
+import { isTopicRoot, topicMeta, topicsAll as topicsAllIn, topicsUpdate as topicsUpdateIn } from './topics.mjs'
 import { LIVE, langOf, pickLang, rememberLang, t } from './i18n.mjs'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
@@ -668,6 +669,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           chat_id: { type: 'string' },
           text: { type: 'string' },
+          thread_id: {
+            type: 'string',
+            description: 'Forum topic: the thread_id from the inbound <channel> block. A message from a topic is answered in that topic; without it — the General topic or a plain chat.',
+          },
           reply_to: {
             type: 'string',
             description: 'Message ID to thread under. Use message_id from the inbound <channel> block.',
@@ -717,6 +722,35 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'pin',
+      description: 'Pin (or unpin) a message in a chat — an important report or a question that waits for the owner. Pin only what waits for the owner or a day/week summary; unpin what is closed (unpin: true). In a group the bot must be an admin allowed to pin messages.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chat_id: { type: 'string' },
+          message_id: { type: 'string' },
+          unpin: { type: 'boolean', description: 'true — unpin this message' },
+          notify: { type: 'boolean', description: 'true — notify members about the pin (silent by default)' },
+        },
+        required: ['chat_id', 'message_id'],
+      },
+    },
+    {
+      name: 'topic',
+      description: 'Forum topics in a group with Topics on. action: list — what there is (name, open/closed, last activity); create — a new topic for a task longer than a day (name, icon_color), returns thread_id; rename; close — archive it (first post the summary with proof in the topic itself); reopen. No delete — that cannot be undone. The bot needs the admin right «Manage topics».',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chat_id: { type: 'string' },
+          action: { type: 'string', enum: ['list', 'create', 'rename', 'close', 'reopen'] },
+          thread_id: { type: 'string', description: 'for rename/close/reopen' },
+          name: { type: 'string', description: 'for create/rename, up to 128 characters' },
+          icon_color: { type: 'number', description: 'create: 7322096 blue · 16766590 yellow · 13338331 violet · 9367192 green · 16749490 pink · 16478047 red' },
+        },
+        required: ['chat_id', 'action'],
+      },
+    },
+    {
       name: 'download_attachment',
       description: 'Download a file attachment from a Telegram message to the local inbox. Use when the inbound <channel> meta shows attachment_file_id. Returns the local file path ready to Read. Telegram caps bot downloads at 20MB.',
       inputSchema: {
@@ -756,6 +790,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const chat_id = args.chat_id as string
         const text = args.text as string
         const reply_to = args.reply_to != null ? Number(args.reply_to) : undefined
+        // A forum topic: the answer goes to the topic the message came from (thread_id from the inbound <channel>).
+        const thread = args.thread_id != null && String(args.thread_id) !== '' ? { message_thread_id: Number(args.thread_id) } : {}
         const files = (args.files as string[] | undefined) ?? []
         const format = (args.format as string | undefined) ?? 'text'
         const parseMode = format === 'markdownv2' ? 'MarkdownV2' as const : undefined
@@ -818,6 +854,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
               (replyMode === 'all' || i === 0)
             const last = i === chunks.length - 1
             const sent = await bot.api.sendMessage(chat_id, chunks[i], {
+              ...thread,
               ...(shouldReplyTo ? { reply_parameters: { message_id: reply_to } } : {}),
               ...(parseMode ? { parse_mode: parseMode } : {}),
               ...(last && replyMarkup ? { reply_markup: replyMarkup as any } : {}),
@@ -842,8 +879,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           const ext = extname(f).toLowerCase()
           const input = new InputFile(f)
           const opts = reply_to != null && replyMode !== 'off'
-            ? { reply_parameters: { message_id: reply_to } }
-            : undefined
+            ? { ...thread, reply_parameters: { message_id: reply_to } }
+            : (Object.keys(thread).length ? thread : undefined)
           if (PHOTO_EXTS.has(ext)) {
             const sent = await bot.api.sendPhoto(chat_id, input, opts)
             sentIds.push(sent.message_id)
@@ -865,6 +902,58 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           { type: 'emoji', emoji: args.emoji as ReactionTypeEmoji['emoji'] },
         ])
         return { content: [{ type: 'text', text: 'reacted' }] }
+      }
+      case 'pin': {
+        assertAllowedChat(args.chat_id as string)
+        const chat = args.chat_id as string
+        const mid = Number(args.message_id)
+        if (!Number.isFinite(mid)) throw new Error('pin: message_id must be a number')
+        if (args.unpin === true) {
+          await bot.api.unpinChatMessage(chat, mid)
+          return { content: [{ type: 'text', text: `unpinned ${mid}` }] }
+        }
+        await bot.api.pinChatMessage(chat, mid, { disable_notification: args.notify !== true })
+        return { content: [{ type: 'text', text: `pinned ${mid}` }] }
+      }
+      case 'topic': {
+        const chat = args.chat_id as string
+        assertAllowedChat(chat)
+        if (!chat.startsWith('-')) throw new Error('topic: only groups with Topics on')
+        const action = String(args.action)
+        const now = new Date().toISOString()
+        const tid = args.thread_id != null ? Number(args.thread_id) : NaN
+        const needTid = () => { if (!Number.isFinite(tid)) throw new Error(`topic ${action}: thread_id is needed`) }
+        const name = args.name != null ? String(args.name).trim().slice(0, 128) : ''
+        switch (action) {
+          case 'list': {
+            const c = topicsAll()[chat] ?? {}
+            const rows = Object.entries(c).sort((a, b) => String(b[1].last ?? '').localeCompare(String(a[1].last ?? '')))
+              .map(([id, t]) => `${t.status === 'closed' ? '✅' : '🟢'} ${id} · ${t.name ?? '(name not seen yet)'} · ${t.last ?? '—'}${t.last_user ? ' · ' + t.last_user : ''}`)
+            return { content: [{ type: 'text', text: rows.length ? rows.join('\n') : 'no topics in the registry yet (it fills from incoming messages and from create)' }] }
+          }
+          case 'create': {
+            if (!name) throw new Error('topic create: name is needed')
+            const color = args.icon_color != null ? { icon_color: Number(args.icon_color) as any } : {}
+            const t = await bot.api.createForumTopic(chat, name, color)
+            topicsUpdate(chat, t.message_thread_id, { name, status: 'open', created: now, last: now })
+            return { content: [{ type: 'text', text: `created thread_id ${t.message_thread_id} «${name}»` }] }
+          }
+          case 'rename': {
+            needTid(); if (!name) throw new Error('topic rename: name is needed')
+            await bot.api.editForumTopic(chat, tid, { name })
+            topicsUpdate(chat, tid, { name, last: now })
+            return { content: [{ type: 'text', text: `renamed ${tid} → «${name}»` }] }
+          }
+          case 'close': {
+            needTid(); await bot.api.closeForumTopic(chat, tid); topicsUpdate(chat, tid, { status: 'closed', last: now })
+            return { content: [{ type: 'text', text: `closed ${tid}` }] }
+          }
+          case 'reopen': {
+            needTid(); await bot.api.reopenForumTopic(chat, tid); topicsUpdate(chat, tid, { status: 'open', last: now })
+            return { content: [{ type: 'text', text: `reopened ${tid}` }] }
+          }
+          default: throw new Error(`topic: unknown action ${action}`)
+        }
       }
       case 'download_attachment': {
         const file_id = args.file_id as string
@@ -1190,6 +1279,8 @@ bot.command('status', async ctx => {
 // inbound "[button] <label>" — the same gate/disable/deliver shape as the join
 // and permission cards above, generalized for the assistant's own replies.
 const CARDS_FILE = join(STATE_DIR, 'cards.jsonl')
+const topicsAll = () => topicsAllIn(STATE_DIR)
+const topicsUpdate = (chat: string, tid: number, patch: Record<string, unknown>) => topicsUpdateIn(STATE_DIR, chat, tid, patch)
 // Presses are written by the poller only, separately from the session's card registry: a press is what Telegram delivered
 // (who pressed, which button, the card's text as Telegram shows it), so a line the session forges in cards.jsonl is not a press.
 const TAPS_FILE = join(STATE_DIR, 'taps.jsonl')
@@ -1733,11 +1824,12 @@ async function handleInbound(
         user: from.username ?? String(from.id),
         user_id: String(from.id),
         from: authorOf(access, chat_id, String(from.id)),
+        ...topicMeta(STATE_DIR, chat_id, ctx.message, from.username ?? String(from.id)),
         ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
         // Reply context: without it a reply arrives with no quote and the
         // session has to guess what it refers to. quote = the partial selection
         // when the sender made one, otherwise the whole source message.
-        ...(ctx.message?.reply_to_message ? {
+        ...(ctx.message?.reply_to_message && !isTopicRoot(ctx.message.reply_to_message) ? {
           reply_to_message_id: String(ctx.message.reply_to_message.message_id),
           reply_to_user: ctx.message.reply_to_message.from?.username
             ?? String(ctx.message.reply_to_message.from?.id ?? ''),

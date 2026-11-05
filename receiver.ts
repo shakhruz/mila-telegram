@@ -21,6 +21,7 @@ import { loadPolicy, decide, stormy, logDecision, policyPath, logPath } from './
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import { migrateChat, mutateAccess, supergroupTransformer } from './supergroup.mjs'
 import { groupPolicy, groupSenderAllowed, modeOf } from './group-mode.mjs'
+import { isTopicRoot, topicMeta, topicsAll as topicsAllIn, topicsUpdate as topicsUpdateIn } from './topics.mjs'
 import { LIVE, langOf, pickLang, rememberLang, t } from './i18n.mjs'
 import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
@@ -1431,6 +1432,8 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
         user: userName,
         user_id: userId,
         from: authorOf(loadAccess(), chatId, userId),
+        ...((ctx.callbackQuery?.message as any)?.is_topic_message
+            ? { thread_id: String((ctx.callbackQuery!.message as any).message_thread_id) } : {}),
         callback_data: value,
         card_id: cardId,
         ts: new Date().toISOString(),
@@ -1813,7 +1816,8 @@ async function handleInbound(
   // Typing indicator — signals "processing" until we reply (or ~5s elapses).
   // Observer mode: an unaddressed message gets no typing indicator or ack —
   // the bot is reading for context, not about to respond.
-  if (!observeOnly) void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
+  if (!observeOnly) void bot.api.sendChatAction(chat_id, 'typing', (ctx.message as any)?.is_topic_message
+    ? { message_thread_id: (ctx.message as any).message_thread_id } : {}).catch(() => {})
 
   // Ack reaction — lets the user know we're processing. Fire-and-forget.
   // Telegram only accepts a fixed emoji whitelist — if the user configures
@@ -1848,11 +1852,13 @@ async function handleInbound(
         user: from.username ?? String(from.id),
         user_id: String(from.id),
         from: authorOf(access, chat_id, String(from.id)),
+        // a forum topic: where it came from (thread_id) and its name — the answer goes back there
+        ...topicMeta(STATE_DIR, chat_id, ctx.message, from.username ?? String(from.id), FILE_MODE),
         ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
         // Reply context: without it a reply arrives with no quote and the
         // session has to guess what it refers to. quote = the partial selection
         // when the sender made one, otherwise the whole source message.
-        ...(ctx.message?.reply_to_message ? {
+        ...(ctx.message?.reply_to_message && !isTopicRoot(ctx.message.reply_to_message) ? {
           reply_to_message_id: String(ctx.message.reply_to_message.message_id),
           reply_to_user: ctx.message.reply_to_message.from?.username
             ?? String(ctx.message.reply_to_message.from?.id ?? ''),
@@ -1972,6 +1978,19 @@ function migrateGroup(oldId: string, newId: string): boolean {
   if (r.access || r.card || jm) { regenChatsIndex(); process.stderr.write(`migrate: ${oldId} -> ${newId} (access=${r.access}, card=${r.card}, join=${jm})\n`) }
   return r.access || r.card || jm
 }
+// Forum topics: Telegram's service events keep the registry right, whoever created the topic — a person or Mila.
+bot.on(['message:forum_topic_created', 'message:forum_topic_edited', 'message:forum_topic_closed', 'message:forum_topic_reopened'], ctx => {
+  const m = ctx.message as any
+  const chatId = String(ctx.chat.id)
+  const tid = m.message_thread_id as number | undefined
+  if (tid == null || !(chatId in loadAccess().groups)) return
+  const now = new Date().toISOString()
+  if (m.forum_topic_created) topicsUpdateIn(STATE_DIR, chatId, tid, { name: m.forum_topic_created.name, status: 'open', created: now, last: now }, FILE_MODE)
+  else if (m.forum_topic_edited?.name) topicsUpdateIn(STATE_DIR, chatId, tid, { name: m.forum_topic_edited.name, last: now }, FILE_MODE)
+  else if (m.forum_topic_closed) topicsUpdateIn(STATE_DIR, chatId, tid, { status: 'closed', last: now }, FILE_MODE)
+  else if (m.forum_topic_reopened) topicsUpdateIn(STATE_DIR, chatId, tid, { status: 'open', last: now }, FILE_MODE)
+})
+
 bot.on('message:migrate_from_chat_id', ctx => {
   try { migrateGroup(String(ctx.message.migrate_from_chat_id), String(ctx.chat.id)) } catch (err) {
     process.stderr.write(`migrate_from handler error: ${scrubToken(err)}\n`)

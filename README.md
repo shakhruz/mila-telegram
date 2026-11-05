@@ -136,9 +136,11 @@ IDs are numeric user IDs — get yours from [@userinfobot](https://t.me/userinfo
 
 | Tool | Purpose |
 | --- | --- |
-| `reply` | Send to a chat. Takes `chat_id` + `text`, optionally `reply_to` for native threading, `files` (absolute paths) for attachments, and `buttons` (rows of `{label, url\|choice, style}`) for inline buttons. Images send as photos, everything else as documents, 50MB each. Long text is chunked. Returns the sent message ID(s). |
+| `reply` | Send to a chat. Takes `chat_id` + `text`, optionally `thread_id` to answer in a forum topic, `reply_to` for native threading, `files` (absolute paths) for attachments, and `buttons` (rows of `{label, url\|choice, style}`) for inline buttons. Images send as photos, everything else as documents, 50MB each. Long text is chunked. Returns the sent message ID(s). |
 | `react` | Add an emoji reaction by message ID. Telegram's fixed whitelist only (👍 👎 ❤ 🔥 👀 …). |
 | `edit_message` | Edit a message the bot sent. Good for "working…" → result. Own messages only. |
+| `pin` | Pin a message (silently by default) or unpin it. In a group the bot needs the admin right to pin. |
+| `topic` | Forum topics in a group with Topics on: `list`, `create` (returns `thread_id`), `rename`, `close`, `reopen`. No delete. The bot needs the admin right «Manage topics». |
 | `download_attachment` | Fetch a file by `file_id` from an inbound message and return its local path. |
 
 Inbound messages trigger a typing indicator automatically.
