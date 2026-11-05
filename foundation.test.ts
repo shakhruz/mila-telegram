@@ -44,7 +44,7 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
            TELEGRAM_API_ROOT: 'http://keeper/telegram', TELEGRAM_API_UNIX: sock, TELEGRAM_JOURNAL_DIR: join(dir, 'io'),
            TELEGRAM_SHARED_GROUP: '1' }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
   const ev = join(dir, 'io', 'events.jsonl')
-  for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (existsSync(ev) && readFileSync(ev, 'utf8').split('\n').length >= 5) break }
+  for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (existsSync(ev) && readFileSync(ev, 'utf8').split('\n').length >= 4) break }
   await Bun.sleep(300)
   p.kill(); await p.exited; srv.stop(true)
   const lines = readFileSync(ev, 'utf8').trim().split('\n').map(l => JSON.parse(l).params?.meta ?? {})
@@ -52,7 +52,15 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   expect(seen).toContain('getUpdates')                               // the Bot API was reached over the unix socket
   expect(byUser(OWNER)?.from).toBe('owner')
   expect(byUser(TEAM)?.from).toBe('team')                            // a username like the owner's changes nothing
-  expect(byUser(OTHER)?.from).toBe('other')                          // a first name like the owner's, or a line in access.json, changes nothing
+  // a stranger in a group — a first name like the owner's, or a line in access.json, changes nothing — never reaches the session:
+  // not in events.jsonl, only in guests.jsonl (0600, the session's group cannot read it)
+  expect(byUser(OTHER)).toBeUndefined()
+  expect(readFileSync(ev, 'utf8')).not.toContain('stranger')
+  const gf = join(dir, 'io', 'guests.jsonl')
+  const guest = JSON.parse(readFileSync(gf, 'utf8').trim().split('\n')[0])
+  expect(guest.user_id).toBe(String(OTHER)); expect(guest.text).toBe('stranger'); expect(guest.chat_id).toBe(String(GROUP))
+  expect(require('fs').statSync(gf).mode & 0o777).toBe(0o600)
+  expect(seen.filter(m => m === 'setMessageReaction' || m === 'sendChatAction').length).toBeLessThanOrEqual(2)   // owner + team only
   expect(existsSync(join(dir, 'inbound', 'events.jsonl'))).toBe(false)   // journals only in TELEGRAM_JOURNAL_DIR
   expect(require('fs').statSync(ev).mode & 0o777).toBe(0o640)             // the session's group reads, does not write
   const tap = JSON.parse(readFileSync(join(dir, 'io', 'taps.jsonl'), 'utf8').trim().split('\n')[0])

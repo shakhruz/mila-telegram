@@ -29,7 +29,7 @@ import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { execFileSync } from 'child_process'
-import { join, extname, sep } from 'path'
+import { join, extname, sep, dirname } from 'path'
 
 const STATE_DIR = process.env.TELEGRAM_STATE_DIR
 // TELEGRAM_SHARED_GROUP=1 (Mila Agent): the receiver runs as its own OS user and the session's user reads what it writes —
@@ -87,6 +87,9 @@ const INBOUND_DIR = join(STATE_DIR, 'inbound')
 // live in a folder the session can read but not write. Unset: where they always were.
 const JOURNAL_DIR = process.env.TELEGRAM_JOURNAL_DIR || ''
 const EVENTS_FILE = JOURNAL_DIR ? join(JOURNAL_DIR, 'events.jsonl') : join(INBOUND_DIR, 'events.jsonl')
+// A stranger's message in a group (not an owner, not on the group's team) goes here, never to the main session's journal.
+// 0600: in Mila Agent the session's group can read the other journals, not this one.
+const GUESTS_FILE = join(JOURNAL_DIR || INBOUND_DIR, 'guests.jsonl')
 
 // Telegram allows exactly one getUpdates consumer per token. If a previous
 // session crashed (SIGKILL, terminal closed) its server.ts grandchild can
@@ -1760,6 +1763,30 @@ function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
 }
 
+function guestEvent(ctx: Context, text: string, access: Access, attachment?: AttachmentMeta): void {
+  const found: string[] = []
+  const m: any = ctx.message ?? {}
+  const ev = maskSecrets({
+    ts: Date.now(),
+    chat_id: String(ctx.chat!.id),
+    ...(ctx.chat && 'title' in ctx.chat && ctx.chat.title ? { chat_title: String(ctx.chat.title).slice(0, 128) } : {}),
+    ...(m.message_id != null ? { message_id: String(m.message_id) } : {}),
+    ...(m.is_topic_message && m.message_thread_id != null ? { thread_id: String(m.message_thread_id) } : {}),
+    user_id: String(ctx.from!.id),
+    user: ctx.from!.username ?? String(ctx.from!.id),
+    addressed: isMentioned(ctx, access.mentionPatterns),
+    text: String(text).slice(0, 4096),
+    ...(attachment ? { attachment_kind: attachment.kind } : {}),
+  }, found)
+  try {
+    mkdirSync(dirname(GUESTS_FILE), { recursive: true, mode: DIR_MODE })
+    appendFileSync(GUESTS_FILE, JSON.stringify(ev) + '\n', { mode: 0o600 })
+    chmodSync(GUESTS_FILE, 0o600)
+  } catch (err) {
+    process.stderr.write(`telegram: guests journal not written: ${err}\n`)
+  }
+}
+
 async function handleInbound(
   ctx: Context,
   text: string,
@@ -1777,6 +1804,14 @@ async function handleInbound(
 
   const access = result.access
   const observeOnly = result.observeOnly === true
+  // Safe by default: in a group, a stranger's text (anyone who is not an owner or on the group's team — bots, channels and
+  // anonymous admins included) does not reach the main session with its tools. It goes to the guests' journal only; no typing,
+  // no ack, no download. Answering strangers is the separate guest lane's job.
+  if ((ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup')
+      && authorOf(access, String(ctx.chat.id), String(ctx.from!.id)) === 'other') {
+    guestEvent(ctx, text, access, attachment)
+    return
+  }
   if (!observeOnly && await loginSelfHook(ctx, text)) return
   const from = ctx.from!
   const chat_id = String(ctx.chat!.id)

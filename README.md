@@ -14,6 +14,8 @@ This is an extended fork of the [official Telegram channel plugin](https://githu
 
 **Group auto-join with one-tap approval.** Add the bot to a group — the owner gets a card in a private chat (`/channel_join` in the group is a fallback), with a short explanation of each mode, in the owner's language: run the chat, by mention, observer, only me (only the owner can call the bot there), or reject. Every decision — rejections included — is appended to an `auth-log.jsonl` journal, and each connected chat gets a context card in `chats/<id>.md` plus a generated `CHATS.md` registry. No numeric chat IDs, no editing JSON by hand; group messages can never change the allowlist themselves — approval only happens in the owner's private chat.
 
+**Strangers in a group never reach the session.** In a connected group only the owners (by Telegram id) and the group's `team` list (`access.json` → `groups.<id>.team`) reach the Claude session. Anyone else — other members, bots, channels, anonymous admins — goes to `guests.jsonl` (0600) in the receiver's journal folder, gets no typing, no ack and no answer, and their files are not downloaded. Observer mode and «run the chat» apply to the owners and the team. Answering strangers safely is the job of a separate guest lane, not in this version.
+
 **Observer mode.** A group can be connected as an observer: the bot reads every message for context, but only replies when it's actually addressed (@mention or a reply to its own message). Everything else still reaches the session — so the assistant knows what's going on in the chat — but arrives marked `observe_only: "true"` with a note not to reply, and doesn't trigger a typing indicator or ack reaction. The older listen-only mode (bot hears the chat, replies are blocked mechanically) still works for chats already set up that way.
 
 **Co-owners.** With more than one owner on `owners`, a join card goes to all of them, and whoever taps first decides. The rest get a notification ("✅ *name* connected the bot to *chat* — mode: …", or the rejection equivalent) instead of a live card, so two owners can never approve the same request twice; a second tap on an already-decided card gets "Already decided by another owner or expired."
@@ -37,7 +39,7 @@ Read this before you put it on a machine that matters.
 
 **Messages are untrusted input.** Anything anyone sends the bot reaches your assistant as content. Someone in an allowlisted chat can try to instruct it. Treat the channel as a public door into a session that can read files and run commands.
 
-**Groups require a mention by default.** An approved group is added with `requireMention: true`, so the bot only responds when addressed. Turning that off means every message from every member goes straight into the session — that is a real prompt-injection surface, not a theoretical one. Turn it off only for a chat where you trust every member.
+**Groups require a mention by default.** An approved group is added with `requireMention: true`, so the bot only responds when addressed. Turning that off means every message from the owners and the group's team goes into the session; strangers' messages do not (see above).
 
 **Attachments can go out.** The `reply` tool sends any absolute path the assistant passes it. That is deliberate — it's how you get files out of a session — but combined with the point above it is also an exfiltration path. Your permission settings, not this plugin, are what stand between a message and a file leaving your machine.
 
