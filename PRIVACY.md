@@ -7,7 +7,10 @@ nothing from it.
 ## What data it handles
 - Messages and attachments that Telegram users send to your bot. The plugin receives everything Telegram delivers to the bot.
   Only messages from chats on your allowlist (`access.json`) are passed on; other messages are dropped, except that in pairing
-  mode a stranger gets a pairing code.
+  mode a stranger gets a pairing code. In a connected group the mode decides what is passed on: in «Run the chat» and
+  «Observer» that is every member's messages.
+  Known gap, being fixed: a voice note is downloaded and, if you set a transcription command, transcribed before this check —
+  also from people who are not allowed; the text is then dropped.
 - Telegram metadata that comes with a message: chat id, user id, username, display name, message id, time.
 - Your bot token.
 
@@ -15,7 +18,8 @@ nothing from it.
 - **Your Claude Code session.** Allowlisted messages are delivered to the Claude Code session on your machine. The model then
   processes them under the terms of the Claude account or API key you signed in with (Anthropic, or the cloud provider you
   chose). The plugin sends them nowhere else.
-- **Telegram.** The plugin talks only to the Telegram Bot API (`https://api.telegram.org`), using your bot token: to receive
+- **Telegram.** The plugin talks only to the Telegram Bot API (`https://api.telegram.org`, or the address in `TELEGRAM_API_ROOT` — in
+  Mila Agent the key keeper, which adds the token), using your bot token: to receive
   messages, download attachments and send replies.
 - **Nothing else.** No telemetry, no analytics, no data to the plugin's authors or any other third party.
 - **Optional, set by you:** if you set `TELEGRAM_VOICE_TRANSCRIBE_CMD`, the plugin passes the path of a downloaded voice note to
@@ -24,8 +28,11 @@ nothing from it.
 ## Where it is stored
 Everything stays on your machine under `~/.claude/channels/telegram/` (or `TELEGRAM_STATE_DIR`):
 - `access.json` — who may talk to the bot, chat modes;
-- the inbound journal and per-chat notes the receiver keeps, so messages are not lost while the session restarts;
-- downloaded attachments;
+- the inbound journal and per-chat notes the receiver keeps (daemon mode, as in Mila Agent), so messages are not lost while the
+  session restarts. The journal has no size limit or expiry yet and keeps message text as it came, except that keys and tokens
+  are masked; without the daemon there is no journal;
+- the language of people who wrote in a private chat or added the bot to a group (`langs.json`, id → language code);
+- downloaded attachments (photos and voice notes as they arrive, other files when asked) — they are not deleted automatically;
 - approval cards and join requests;
 - `.env` with the bot token (mode 600), only if you saved the token that way.
 
