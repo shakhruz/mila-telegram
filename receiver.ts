@@ -113,7 +113,10 @@ process.on('uncaughtException', err => {
 // Strict: no bare yes/no (conversational), no prefix/suffix chatter.
 const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
 
-const bot = new Bot(TOKEN)
+// TELEGRAM_API_ROOT: where Bot API calls go. Default Telegram; Mila Agent points it at its key keeper, which holds the real
+// token and puts it into the path — this process then only has a placeholder token.
+const API_ROOT = (process.env.TELEGRAM_API_ROOT || 'https://api.telegram.org').replace(/\/+$/, '')
+const bot = new Bot(TOKEN, { client: { apiRoot: API_ROOT } })
 // SUPERGROUP-1004: 400 "upgraded to a supergroup" -> migrate access, retry on the new id
 bot.api.config.use(supergroupTransformer(STATE_DIR, 'receiver'))
 let botUsername = ''
@@ -868,7 +871,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const file_id = args.file_id as string
         const file = await bot.api.getFile(file_id)
         if (!file.file_path) throw new Error('Telegram returned no file_path — file may have expired')
-        const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
+        const url = `${API_ROOT}/file/bot${TOKEN}/${file.file_path}`
         const res = await fetch(url)
         if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
         const buf = Buffer.from(await res.arrayBuffer())
@@ -1327,7 +1330,7 @@ async function rawApi(method: string, params: Record<string, unknown>): Promise<
   // Direct Bot API call: the bundled grammy version predates Bot API 10.3's
   // `disabled`/`style` fields, so its types would only get in the way here.
   try {
-    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, {
+    const res = await fetch(`${API_ROOT}/bot${TOKEN}/${method}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -1579,7 +1582,7 @@ bot.on('message:photo', async ctx => {
     try {
       const file = await ctx.api.getFile(best.file_id)
       if (!file.file_path) return undefined
-      const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
+      const url = `${API_ROOT}/file/bot${TOKEN}/${file.file_path}`
       const res = await fetch(url)
       const buf = Buffer.from(await res.arrayBuffer())
       const ext = file.file_path.split('.').pop() ?? 'jpg'
@@ -1633,7 +1636,7 @@ async function transcribeVoice(
     if (file.file_size != null && file.file_size > VOICE_DL_LIMIT) {
       return '[voice, not transcribed: file >20MB]'
     }
-    const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
+    const url = `${API_ROOT}/file/bot${TOKEN}/${file.file_path}`
     const res = await fetch(url)
     const buf = Buffer.from(await res.arrayBuffer())
     const ext = file.file_path.split('.').pop() ?? 'oga'
