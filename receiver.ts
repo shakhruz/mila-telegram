@@ -24,6 +24,7 @@ import { groupPolicy, groupSenderAllowed, modeOf } from './group-mode.mjs'
 import { isTopicRoot, topicMeta, topicsAll as topicsAllIn, topicsUpdate as topicsUpdateIn } from './topics.mjs'
 import { LIVE, langOf, pickLang, rememberLang, t } from './i18n.mjs'
 import { askOnce, setTeam, teamOf } from './team.mjs'
+import { createConnection } from 'node:net'
 import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
@@ -1798,6 +1799,39 @@ function strangerQuoted(ctx: Context, access: Access, chatId: string): string | 
   return `[a stranger's message, ${n} characters — not shown to the session; it is in the guests' journal]`
 }
 
+// The strangers' lane (Mila Agent): a separate process as its own OS user that answers with no tools. The receiver hands it an
+// addressed stranger's text and sends what comes back — text only, to the same chat, as a reply. No lane — strangers get no answer.
+const GUEST_LANE = process.env.TELEGRAM_GUEST_LANE || ''
+
+function laneAsk(text: string, chatId: string): Promise<string> {
+  return new Promise(resolve => {
+    let buf = '', done = false
+    const end = (v: string) => { if (!done) { done = true; try { sock.destroy() } catch {} ; resolve(v) } }
+    const sock = createConnection({ path: GUEST_LANE })
+    sock.setTimeout(120_000, () => end(''))
+    sock.on('error', () => end(''))
+    sock.on('connect', () => sock.write(JSON.stringify({ chat_id: chatId, text: text.slice(0, 2000) }) + '\n'))
+    sock.on('data', ch => {
+      buf += ch.toString('utf8')
+      if (buf.includes('\n')) {
+        try { const r = JSON.parse(buf.split('\n')[0]!); end(r && r.ok && typeof r.text === 'string' ? r.text : '') } catch { end('') }
+      }
+    })
+    sock.on('close', () => end(''))
+  })
+}
+
+async function laneAnswer(ctx: Context, text: string): Promise<void> {
+  const chatId = String(ctx.chat!.id), m: any = ctx.message ?? {}
+  if (!String(text).trim()) return
+  const out = (await laneAsk(String(text), chatId)).slice(0, 1500)
+  if (!out) return
+  await bot.api.sendMessage(chatId, out, {
+    ...(m.message_id != null ? { reply_parameters: { message_id: m.message_id, allow_sending_without_reply: true } } : {}),
+    ...(m.is_topic_message && m.message_thread_id != null ? { message_thread_id: m.message_thread_id } : {}),
+  } as any).catch(err => process.stderr.write(`telegram: lane answer not sent: ${scrubToken(err)}\n`))
+}
+
 // How many strangers wrote in a group since the session last heard from it: the session gets the number, never the text.
 const GUESTS_SINCE = new Map<string, number>()
 
@@ -1867,6 +1901,7 @@ async function handleInbound(
     guestEvent(ctx, text, access, attachment)
     GUESTS_SINCE.set(String(ctx.chat.id), (GUESTS_SINCE.get(String(ctx.chat.id)) ?? 0) + 1)
     void askTeam(ctx, access)
+    if (GUEST_LANE && isMentioned(ctx, access.mentionPatterns)) void laneAnswer(ctx, text)
     return
   }
   if (!observeOnly && await loginSelfHook(ctx, text)) return
