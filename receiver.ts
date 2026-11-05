@@ -37,6 +37,7 @@ const SHARED = process.env.TELEGRAM_SHARED_GROUP === '1'
 const FILE_MODE = SHARED ? 0o660 : 0o600      // cards, notes, settings the session may also write
 const JOURNAL_MODE = SHARED ? 0o640 : 0o600   // what only the receiver writes: inbound, presses, the authorization log
 const DIR_MODE = SHARED ? 0o2770 : 0o700
+if (SHARED) process.umask(0o007)   // the modes above, not cut by an owner-only umask of the starting shell
   ?? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'channels', 'telegram')
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
@@ -81,7 +82,10 @@ const IS_DAEMON = process.env.RECEIVER_DAEMON === '1'
 const PID_FILE = join(STATE_DIR, IS_DAEMON ? 'receiver.pid' : 'bot.pid')
 // ─── Daemon mode: events to file instead of stdio ───
 const INBOUND_DIR = join(STATE_DIR, 'inbound')
-const EVENTS_FILE = join(INBOUND_DIR, 'events.jsonl')
+// TELEGRAM_JOURNAL_DIR (Mila Agent): the journals only the receiver writes — inbound, presses, authorizations, suspicious —
+// live in a folder the session can read but not write. Unset: where they always were.
+const JOURNAL_DIR = process.env.TELEGRAM_JOURNAL_DIR || ''
+const EVENTS_FILE = JOURNAL_DIR ? join(JOURNAL_DIR, 'events.jsonl') : join(INBOUND_DIR, 'events.jsonl')
 
 // Telegram allows exactly one getUpdates consumer per token. If a previous
 // session crashed (SIGKILL, terminal closed) its server.ts grandchild can
@@ -279,7 +283,7 @@ function loadAccess(): Access {
 }
 
 // ─── Authorization log and chat registry ───
-const AUTH_LOG = join(STATE_DIR, 'auth-log.jsonl')
+const AUTH_LOG = join(JOURNAL_DIR || STATE_DIR, 'auth-log.jsonl')
 const CHATS_DIR = join(STATE_DIR, 'chats')
 const MODE_LABEL: Record<string, string> = {
   owner: '🙋 only the owner',
@@ -1293,7 +1297,7 @@ bot.command('status', async ctx => {
 const CARDS_FILE = join(STATE_DIR, 'cards.jsonl')
 // Presses are written by the poller only, separately from the session's card registry: a press is what Telegram delivered
 // (who pressed, which button, the card's text as Telegram shows it), so a line the session forges in cards.jsonl is not a press.
-const TAPS_FILE = join(STATE_DIR, 'taps.jsonl')
+const TAPS_FILE = join(JOURNAL_DIR || STATE_DIR, 'taps.jsonl')
 
 type CardButton = { label: string; data?: string; url?: string }
 type CardRecord = {
@@ -1326,7 +1330,7 @@ function cardState(cardId: string): { card: CardRecord | null; used: CardRecord 
 function noteSuspiciousCardTap(entry: Record<string, unknown>): void {
   try {
     mkdirSync(STATE_DIR, { recursive: true, mode: DIR_MODE })
-    appendFileSync(join(STATE_DIR, 'suspicious.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: JOURNAL_MODE })
+    appendFileSync(join(JOURNAL_DIR || STATE_DIR, 'suspicious.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: JOURNAL_MODE })
   } catch {}
 }
 

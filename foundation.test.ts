@@ -39,8 +39,10 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('TELEGRAM_')) base[k] = v
   const p = Bun.spawn(['bun', join(import.meta.dir, 'receiver.ts')], {
     env: { ...base, RECEIVER_DAEMON: '1', TELEGRAM_STATE_DIR: dir, TELEGRAM_BOT_TOKEN: '1234' + '5678:' + 'x'.repeat(35),
-           TELEGRAM_API_ROOT: 'http://keeper/telegram', TELEGRAM_API_UNIX: sock }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
-  const ev = join(dir, 'inbound', 'events.jsonl')
+           TELEGRAM_API_ROOT: 'http://keeper/telegram', TELEGRAM_API_UNIX: sock, TELEGRAM_JOURNAL_DIR: join(dir, 'io'),
+           TELEGRAM_SHARED_GROUP: '1' }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  require('fs').mkdirSync(join(dir, 'io'))
+  const ev = join(dir, 'io', 'events.jsonl')
   for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (existsSync(ev) && readFileSync(ev, 'utf8').split('\n').length >= 5) break }
   await Bun.sleep(300)
   p.kill(); await p.exited; srv.stop(true)
@@ -50,7 +52,9 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   expect(byUser(OWNER)?.from).toBe('owner')
   expect(byUser(TEAM)?.from).toBe('team')                            // a username like the owner's changes nothing
   expect(byUser(OTHER)?.from).toBe('other')                          // a first name like the owner's changes nothing
-  const tap = JSON.parse(readFileSync(join(dir, 'taps.jsonl'), 'utf8').trim().split('\n')[0])
+  expect(existsSync(join(dir, 'inbound', 'events.jsonl'))).toBe(false)   // journals only in TELEGRAM_JOURNAL_DIR
+  expect(require('fs').statSync(ev).mode & 0o777).toBe(0o640)             // the session's group reads, does not write
+  const tap = JSON.parse(readFileSync(join(dir, 'io', 'taps.jsonl'), 'utf8').trim().split('\n')[0])
   expect(tap.card_id).toBe('c1'); expect(tap.used_by).toBe(String(OWNER)); expect(tap.data).toBe('ok')
   expect(tap.card_text).toBe('Pack «X»\n#pack-x-1')                 // what Telegram showed, not the registry's forged text
   expect(lines.find((m: any) => m.type === 'callback')?.from).toBe('owner')
