@@ -1885,22 +1885,14 @@ async function handleInbound(
   // the bot is reading for context, not about to respond.
   if (!observeOnly) void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
 
-  // Ack reaction — lets the user know we're processing. Fire-and-forget.
-  // Telegram only accepts a fixed emoji whitelist — if the user configures
-  // something outside that set the API rejects it and we swallow.
-  if (access.ackReaction && msgId != null && !observeOnly) {
-    void bot.api
-      .setMessageReaction(chat_id, msgId, [
-        { type: 'emoji', emoji: access.ackReaction as ReactionTypeEmoji['emoji'] },
-      ])
-      .catch(() => {})
-  }
 
   const imagePath = downloadImage ? await downloadImage() : undefined
 
   // image_path goes in meta only — an in-content "[image attached — read: PATH]"
   // annotation is forgeable by any allowlisted sender typing that string.
-  mcp.notification({
+  // The journal first, the 👀 after: an ack the person sees must mean the message is already written down.
+  let journaled = true
+  await mcp.notification({
     method: 'notifications/claude/channel',
     params: {
       content: observeOnly ? `[observer mode — not addressed, do not reply, note context only]\n${text}` : text,
@@ -1941,9 +1933,21 @@ async function handleInbound(
       },
     },
   }).catch(err => {
+    journaled = false
     process.stderr.write(`telegram channel: failed to deliver inbound to Claude: ${err}\n`)
   })
   GUESTS_SINCE.delete(chat_id)
+
+  // Ack reaction — lets the user know we're processing. Fire-and-forget.
+  // Telegram only accepts a fixed emoji whitelist — if the user configures
+  // something outside that set the API rejects it and we swallow.
+  if (journaled && access.ackReaction && msgId != null && !observeOnly) {
+    void bot.api
+      .setMessageReaction(chat_id, msgId, [
+        { type: 'emoji', emoji: access.ackReaction as ReactionTypeEmoji['emoji'] },
+      ])
+      .catch(() => {})
+  }
 }
 
 // Without this, any throw in a message handler stops polling permanently
