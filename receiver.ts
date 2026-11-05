@@ -1461,6 +1461,16 @@ async function handleCardTap(ctx: any, cardId: string, rawValue: string): Promis
 // Security mirrors the text-reply path: allowFrom must contain the sender.
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
+  // A consent card drawn by the consent proxy (Mila Agent): the press goes to the proxy, which checks the owner, the signature and
+  // the deadline itself and runs the action — the session never sees or decides it.
+  if (CONSENT_IO && /^consent:[0-9a-f]{8}\.[0-9a-f]{20}\.[yns]$/.test(data)) {
+    const r = await consentPress(data, String(ctx.from.id), String(ctx.chat?.id ?? ''))
+    const lg = L(ctx), line = t(lg, 'consent.' + (['granted', 'declined', 'stopped'].includes(r) ? r : 'ignored'))
+    await ctx.answerCallbackQuery({ text: line.slice(0, 190) }).catch(() => {})
+    const msg: any = ctx.callbackQuery.message
+    if (r !== 'ignored' && msg?.text) await ctx.editMessageText(`${msg.text}\n\n${line}`).catch(() => {})
+    return
+  }
   const tm = /^team:(add|skip|del):(-?[0-9]{1,20}):([0-9]{1,20})$/.exec(data)
   if (tm) {
     // Only the owner, only in a private chat: the team list never changes from a group.
@@ -1849,6 +1859,25 @@ async function laneAnswer(ctx: Context, text: string): Promise<void> {
     ...(m.message_id != null ? { reply_parameters: { message_id: m.message_id, allow_sending_without_reply: true } } : {}),
     ...(m.is_topic_message && m.message_thread_id != null ? { message_thread_id: m.message_thread_id } : {}),
   } as any).catch(err => process.stderr.write(`telegram: lane answer not sent: ${scrubToken(err)}\n`))
+}
+
+// The consent proxy's io socket (Mila Agent): only the receiver's OS user reaches it.
+const CONSENT_IO = process.env.TELEGRAM_CONSENT_IO || ''
+
+function consentPress(data: string, fromId: string, chatId: string): Promise<string> {
+  return new Promise(resolve => {
+    let buf = '', done = false
+    const end = (v: string) => { if (!done) { done = true; try { sock.destroy() } catch {} ; resolve(v) } }
+    const sock = createConnection({ path: CONSENT_IO })
+    sock.setTimeout(20_000, () => end('ignored'))
+    sock.on('error', () => end('ignored'))
+    sock.on('connect', () => sock.write(JSON.stringify({ op: 'callback', data, from_id: fromId, chat_id: chatId }) + '\n'))
+    sock.on('data', ch => {
+      buf += ch.toString('utf8')
+      if (buf.includes('\n')) { try { end(String(JSON.parse(buf.split('\n')[0]!).status ?? 'ignored')) } catch { end('ignored') } }
+    })
+    sock.on('close', () => end('ignored'))
+  })
 }
 
 // How many strangers wrote in a group since the session last heard from it: the session gets the number, never the text.

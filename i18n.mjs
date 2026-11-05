@@ -69,6 +69,11 @@ const W = {
     uz: 'Guruhlaringizdagi odamlarga bugungi javoblar chegarasi tugadi — kun oxirigacha ular javobsiz. Chegara begonalar uchun kalitingizni asraydi; uni oshirish mumkin (LANE_DAY_ALL).',
     zh: '今天回复群内其他人的次数已达上限——今天剩余时间将不再回复。此上限用于保护你的外部密钥，可调高（LANE_DAY_ALL）。',
   },
+  // a press on the consent proxy's card
+  'consent.granted':  { en: '✅ Allowed — doing it.', ru: '✅ Разрешено — выполняю.', uz: '✅ Ruxsat berildi — bajaryapman.', zh: '✅ 已允许——正在执行。' },
+  'consent.declined': { en: '❌ Not allowed. Not doing it.', ru: '❌ Не разрешено. Не выполняю.', uz: '❌ Ruxsat berilmadi. Bajarmayman.', zh: '❌ 未允许，不执行。' },
+  'consent.stopped':  { en: '⏹ The permission is stopped.', ru: '⏹ Полномочие остановлено.', uz: '⏹ Vakolat to‘xtatildi.', zh: '⏹ 授权已停止。' },
+  'consent.ignored':  { en: 'This card is no longer valid.', ru: 'Эта карточка уже не действует.', uz: 'Bu karta endi amal qilmaydi.', zh: '此卡片已失效。' },
   'team.btn.add':  { en: '✅ Add to the team', ru: '✅ В команду', uz: '✅ Jamoaga', zh: '✅ 加入团队' },
   'team.btn.skip': { en: 'Not now', ru: 'Не сейчас', uz: 'Hozir emas', zh: '暂不' },
   'team.btn.del':  { en: 'Remove from the team', ru: 'Убрать из команды', uz: 'Jamoadan chiqarish', zh: '移出团队' },
