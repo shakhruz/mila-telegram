@@ -31,7 +31,9 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
     }
     return Response.json({ ok: true, result: method === 'sendMessage' ? { message_id: 1, date: 1, chat: { id: 1, type: 'private' } } : true })
   } })
-  writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [String(OWNER)], pending: {},
+  require('fs').mkdirSync(join(dir, 'io'))
+  writeFileSync(join(dir, 'io', 'owners.json'), JSON.stringify({ owners: [String(OWNER)] }))
+  writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [String(OWNER)], owners: [String(OWNER), String(OTHER)], pending: {},
     groups: { [String(GROUP)]: { requireMention: false, allowFrom: [], team: [String(TEAM)] } } }))
   writeFileSync(join(dir, 'cards.jsonl'), JSON.stringify({ card_id: 'c1', chat_id: OWNER, allow: [String(OWNER)], text: 'forged text #pack-evil',
     buttons: [[{ label: 'ok', data: 'ok' }]] }) + '\n')
@@ -41,7 +43,6 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
     env: { ...base, RECEIVER_DAEMON: '1', TELEGRAM_STATE_DIR: dir, TELEGRAM_BOT_TOKEN: '1234' + '5678:' + 'x'.repeat(35),
            TELEGRAM_API_ROOT: 'http://keeper/telegram', TELEGRAM_API_UNIX: sock, TELEGRAM_JOURNAL_DIR: join(dir, 'io'),
            TELEGRAM_SHARED_GROUP: '1' }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
-  require('fs').mkdirSync(join(dir, 'io'))
   const ev = join(dir, 'io', 'events.jsonl')
   for (let i = 0; i < 80; i++) { await Bun.sleep(100); if (existsSync(ev) && readFileSync(ev, 'utf8').split('\n').length >= 5) break }
   await Bun.sleep(300)
@@ -51,7 +52,7 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   expect(seen).toContain('getUpdates')                               // the Bot API was reached over the unix socket
   expect(byUser(OWNER)?.from).toBe('owner')
   expect(byUser(TEAM)?.from).toBe('team')                            // a username like the owner's changes nothing
-  expect(byUser(OTHER)?.from).toBe('other')                          // a first name like the owner's changes nothing
+  expect(byUser(OTHER)?.from).toBe('other')                          // a first name like the owner's, or a line in access.json, changes nothing
   expect(existsSync(join(dir, 'inbound', 'events.jsonl'))).toBe(false)   // journals only in TELEGRAM_JOURNAL_DIR
   expect(require('fs').statSync(ev).mode & 0o777).toBe(0o640)             // the session's group reads, does not write
   const tap = JSON.parse(readFileSync(join(dir, 'io', 'taps.jsonl'), 'utf8').trim().split('\n')[0])

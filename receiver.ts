@@ -264,6 +264,15 @@ const BOOT_ACCESS: Access | null = STATIC
 // — a colleague who may message the assistant should not be able to approve a
 // tool run in someone else's session.
 function ownersOf(access: { owners?: string[]; allowFrom: string[] }): string[] {
+  // Mila Agent: who is an owner comes from the receiver's own io/owners.json (set from the platform's OWNER_ID or at the first
+  // pairing) — not from access.json, which the session can write.
+  if (JOURNAL_DIR) {
+    try {
+      const o = JSON.parse(readFileSync(join(JOURNAL_DIR, 'owners.json'), 'utf8')).owners
+      if (Array.isArray(o)) return o.map(String).filter(x => /^[0-9]+$/.test(x))
+    } catch {}
+    return []
+  }
   return access.owners && access.owners.length ? access.owners : access.allowFrom
 }
 
