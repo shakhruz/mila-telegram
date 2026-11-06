@@ -2020,6 +2020,8 @@ async function handleInbound(
         ...(msgId != null ? { message_id: String(msgId) } : {}),
         user: from.username ?? String(from.id),
         user_id: String(from.id),
+        // the language of the sender's Telegram app: a newcomer is greeted in it before they have written a word (the core reads lang=)
+        ...(from.language_code && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})?$/.test(from.language_code) ? { lang: String(from.language_code) } : {}),
         from: authorOf(access, chat_id, String(from.id)),
         ...(GUESTS_SINCE.get(chat_id) ? { guests_since_last: String(GUESTS_SINCE.get(chat_id)) } : {}),
         // a forum topic: where it came from (thread_id) and its name — the answer goes back there

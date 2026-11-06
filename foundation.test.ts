@@ -14,7 +14,7 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   const sock = join(dir, 'api.sock')
   const seen: string[] = []
   const updates = [
-    { update_id: 1, message: { message_id: 10, date: 1, chat: { id: OWNER, type: 'private' }, from: { id: OWNER, is_bot: false, first_name: 'O' }, text: 'hi from owner' } },
+    { update_id: 1, message: { message_id: 10, date: 1, chat: { id: OWNER, type: 'private' }, from: { id: OWNER, is_bot: false, first_name: 'O', language_code: 'uz' }, text: 'hi from owner' } },
     { update_id: 2, message: { message_id: 11, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: TEAM, is_bot: false, first_name: 'T', username: 'owner_lookalike' }, text: 'team task' } },
     { update_id: 3, message: { message_id: 12, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: OTHER, is_bot: false, first_name: 'Shahruz', username: 'shahruz' }, text: 'stranger' } },
     { update_id: 5, message: { message_id: 13, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: OWNER, is_bot: false, first_name: 'O' }, text: 'owner replies',
@@ -54,6 +54,8 @@ test('author by id, presses in taps.jsonl with Telegram\'s card text, Bot API ov
   const byUser = (id: number) => lines.find((m: any) => m.user_id === String(id) && m.type !== 'callback')
   expect(seen).toContain('getUpdates')                               // the Bot API was reached over the unix socket
   expect(byUser(OWNER)?.from).toBe('owner')
+  expect(byUser(OWNER)?.lang).toBe('uz')                            // the sender's Telegram language — for the core's lang=
+  expect(byUser(TEAM)?.lang).toBeUndefined()
   expect(byUser(TEAM)?.from).toBe('team')                            // a username like the owner's changes nothing
   // a stranger in a group — a first name like the owner's, or a line in access.json, changes nothing — never reaches the session:
   // not in events.jsonl, only in guests.jsonl (0600, the session's group cannot read it)
