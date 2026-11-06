@@ -2001,6 +2001,38 @@ function archiveMessage(chatId: string, m: any, row: Record<string, unknown>): v
   void archiveFile(chatId, md, String(row.from ?? 'other')).then(f => archive(chatId, { ...row, kind: md.kind, ...f }))
 }
 
+// Outgoing messages (archive part C): the key keeper copies what Telegram answered to every send into a spool only this user
+// reads (TELEGRAM_OUT_SPOOL); here they move into the archive as «mila» lines, from where the spool was read last time.
+const OUT_SPOOL = process.env.TELEGRAM_OUT_SPOOL || ''
+
+function drainOutSpool(): number {
+  if (!ARCHIVE_ON || !OUT_SPOOL) return 0
+  const offFile = join(ARCHIVE_DIR, '.out-offset')
+  let off = 0
+  try { off = Number(readFileSync(offFile, 'utf8')) || 0 } catch {}
+  let size = 0
+  try { size = statSync(OUT_SPOOL).size } catch { return 0 }
+  if (size < off) off = 0                                   // the keeper started a new spool
+  if (size === off) return 0
+  let buf = ''
+  try {
+    const fd = require('fs').openSync(OUT_SPOOL, 'r'); const b = Buffer.alloc(Math.min(size - off, 4 * 1024 * 1024))
+    const n = require('fs').readSync(fd, b, 0, b.length, off); require('fs').closeSync(fd); buf = b.subarray(0, n).toString('utf8')
+  } catch { return 0 }
+  const end = buf.lastIndexOf('\n'); if (end < 0) return 0
+  let moved = 0
+  for (const line of buf.slice(0, end).split('\n')) {
+    try {
+      const r = JSON.parse(line)
+      if (archive(String(r.chat_id ?? ''), { msg: r.message_id ?? null, from: 'mila', kind: 'out', method: String(r.method ?? ''), text: String(r.text ?? '').slice(0, 4096),
+                                             ...(r.file_id ? { file_id: String(r.file_id), file_kind: String(r.kind ?? '') } : {}) })) moved++
+    } catch {}
+  }
+  try { mkdirSync(ARCHIVE_DIR, { recursive: true, mode: 0o700 }); writeFileSync(offFile, String(off + Buffer.byteLength(buf.slice(0, end + 1))), { mode: 0o600 }) } catch {}
+  return moved
+}
+if (IS_DAEMON && ARCHIVE_ON && OUT_SPOOL) setInterval(() => { try { drainOutSpool() } catch {} }, 5000)
+
 /** a group connected before the archive existed is told once, with its first message after the update */
 function announceArchive(chatId: string, lang: string): void {
   if (!ARCHIVE_ON || !chatId.startsWith('-')) return
