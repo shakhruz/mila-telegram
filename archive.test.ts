@@ -18,8 +18,10 @@ test('archive: per chat and month, 0700/0600, author by id, edits, nothing from 
     { update_id: 5, edited_message: { message_id: 1, date: 1, edit_date: 2, chat: { id: OWNER, type: 'private' }, from: { id: OWNER, is_bot: false, first_name: 'O' }, text: 'owner note, edited' } },
   ]
   let served = false
+  const sentTexts: string[] = []
   const srv = Bun.serve({ unix: sock, async fetch(req) {
     const method = new URL(req.url).pathname.split('/').pop()!
+    if (method === 'sendMessage') { const b = await req.json().catch(() => ({})); sentTexts.push(String(b.text ?? '')); return Response.json({ ok: true, result: { message_id: 1, date: 1, chat: { id: b.chat_id, type: 'supergroup' } } }) }
     if (method === 'getMe') return Response.json({ ok: true, result: { id: 777, is_bot: true, first_name: 'M', username: 'm_bot' } })
     if (method === 'getUpdates') {
       if (served) { await Bun.sleep(300); return Response.json({ ok: true, result: [] }) }
@@ -46,5 +48,8 @@ test('archive: per chat and month, 0700/0600, author by id, edits, nothing from 
   expect(own[1]).toMatchObject({ edit: true, msg: 1, text: 'owner note, edited' })        // an edit is its own line
   expect(grp.map((r: any) => [r.from, r.text])).toEqual([['team', 'team task'], ['other', 'stranger hello']])
   expect(existsSync(join(A, String(FAR)))).toBe(false)                                    // an unconnected chat: nothing
+  // a group connected before the archive existed is told once, with its first message
+  const told = sentTexts.filter((t: string) => /keeps an archive of this chat/.test(t))
+  expect(told.length).toBe(1)
   rmSync(dir, { recursive: true, force: true })
 }, 30000)

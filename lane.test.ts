@@ -53,7 +53,7 @@ test('lane: addressed stranger → lane → answer in the same chat; unaddressed
   const ans = sent.find(b => b.text === 'Lane says hi')
   expect(String(ans.chat_id)).toBe(String(GROUP)); expect(ans.reply_parameters?.message_id).toBe(2)
   // a filtered answer (a link not in the owner's knowledge, an @mention): a neutral line instead, as a reply
-  const pass = sent.filter(b => String(b.chat_id) === String(GROUP) && b.text !== 'Lane says hi')
+  const pass = sent.filter(b => String(b.chat_id) === String(GROUP) && b.text !== 'Lane says hi' && !/keeps an archive/.test(b.text))   // the archive notice is told once too
   expect(pass.length).toBe(1); expect(pass[0].reply_parameters?.message_id).toBe(3); expect(pass[0].text).toMatch(/pass your question/)
   // the day's ceiling: silence in the group, one line to the owner (not one per message)
   expect(sent.filter(b => String(b.chat_id) === String(OWNER) && /limit of answers/.test(b.text)).length).toBe(1)

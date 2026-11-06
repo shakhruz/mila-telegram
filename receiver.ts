@@ -28,7 +28,7 @@ import { createConnection } from 'node:net'
 import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { execFileSync } from 'child_process'
 import { join, extname, sep, dirname } from 'path'
@@ -1563,6 +1563,7 @@ bot.on('callback_query:data', async ctx => {
       if (mode !== 'read') {
         // the people in the group are told their messages are kept and who reads them (the archive), at connection
         await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active') + '\n' + t(langOf(STATE_DIR, aReq.requestedBy), 'join.archive')).catch(() => {})
+        try { mkdirSync(join(ARCHIVE_DIR, String(aReq.chatId)), { recursive: true, mode: 0o700 }); writeFileSync(join(ARCHIVE_DIR, String(aReq.chatId), '.announced'), String(Date.now()), { mode: 0o600 }) } catch {}
       }
     } else {
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
@@ -1922,6 +1923,15 @@ function archive(chatId: string, row: Record<string, unknown>): boolean {
   }
 }
 
+/** a group connected before the archive existed is told once, with its first message after the update */
+function announceArchive(chatId: string, lang: string): void {
+  if (!chatId.startsWith('-')) return
+  const mark = join(ARCHIVE_DIR, chatId, '.announced')
+  if (existsSync(mark)) return
+  try { mkdirSync(join(ARCHIVE_DIR, chatId), { recursive: true, mode: 0o700 }); writeFileSync(mark, String(Date.now()), { mode: 0o600 }) } catch { return }
+  void bot.api.sendMessage(chatId, t(lang, 'join.archive')).catch(() => {})
+}
+
 function guestEvent(ctx: Context, text: string, access: Access, attachment?: AttachmentMeta): void {
   const found: string[] = []
   const m: any = ctx.message ?? {}
@@ -1941,6 +1951,7 @@ function guestEvent(ctx: Context, text: string, access: Access, attachment?: Att
     mkdirSync(dirname(GUESTS_FILE), { recursive: true, mode: DIR_MODE })
     appendFileSync(GUESTS_FILE, JSON.stringify(ev) + '\n', { mode: 0o600 })
     chmodSync(GUESTS_FILE, 0o600)
+    announceArchive(String(ctx.chat!.id), langOf(STATE_DIR, ownersOf(access)[0] ?? ''))
     archive(String(ctx.chat!.id), { msg: m.message_id ?? null, from: 'other', user_id: String(ctx.from!.id), kind: attachment?.kind ?? 'text',
                                     text: String(text).slice(0, 4096), ...(m.is_topic_message ? { thread: String(m.message_thread_id) } : {}) })
   } catch (err) {
@@ -2075,6 +2086,7 @@ async function handleInbound(
     process.stderr.write(`telegram channel: failed to deliver inbound to Claude: ${err}\n`)
   })
   GUESTS_SINCE.delete(chat_id)
+  announceArchive(chat_id, langOf(STATE_DIR, ownersOf(access)[0] ?? ''))
   archive(chat_id, { msg: msgId ?? null, from: authorOf(access, chat_id, String(from.id)), user_id: String(from.id), kind: attachment?.kind ?? 'text',
                      text, ...(attachment?.file_id ? { file_id: attachment.file_id } : {}),
                      ...((ctx.message as any)?.is_topic_message ? { thread: String((ctx.message as any).message_thread_id) } : {}) })
