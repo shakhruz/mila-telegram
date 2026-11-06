@@ -27,7 +27,7 @@ import { askOnce, setTeam, teamOf } from './team.mjs'
 import { createConnection } from 'node:net'
 import { loginSelf } from './login-self.mjs'  // LOGIN-SELF-1006
 import type { ReactionTypeEmoji } from 'grammy/types'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { execFileSync } from 'child_process'
@@ -1928,6 +1928,47 @@ function archive(chatId: string, row: Record<string, unknown>): boolean {
   }
 }
 
+/** the file a message carries (the largest photo), for the archive */
+function mediaOf(m: any): { kind: string, file_id: string, size?: number, ext: string } | null {
+  if (!m) return null
+  if (m.photo?.length) { const b = m.photo[m.photo.length - 1]; return { kind: 'photo', file_id: b.file_id, size: b.file_size, ext: 'jpg' } }
+  for (const [k, ext] of [['voice', 'oga'], ['audio', 'mp3'], ['video', 'mp4'], ['video_note', 'mp4'], ['document', 'bin'], ['animation', 'mp4'], ['sticker', 'webp']] as const) {
+    const f = m[k]; if (f?.file_id) return { kind: k, file_id: f.file_id, size: f.file_size, ext }
+  }
+  return null
+}
+
+/** the original into the archive: archive/<chat>/files/<sha[:2]>/<sha256>.<ext>; over 20 MB (the Bot API limit) — metadata only */
+async function archiveFile(chatId: string, md: { kind: string, file_id: string, size?: number, ext: string }): Promise<Record<string, unknown>> {
+  if (md.size != null && md.size > 20 * 1024 * 1024) return { file_id: md.file_id, file: 'not downloaded: over 20 MB' }
+  try {
+    const f = await bot.api.getFile(md.file_id)
+    if (!f.file_path) return { file_id: md.file_id, file: 'not downloaded' }
+    if (f.file_size != null && f.file_size > 20 * 1024 * 1024) return { file_id: md.file_id, file: 'not downloaded: over 20 MB' }
+    const res = await fetch(`${API_ROOT}/file/bot${TOKEN}/${f.file_path}`, FETCH_OPT as any)
+    if (!res.ok) return { file_id: md.file_id, file: 'not downloaded' }
+    const buf = Buffer.from(await res.arrayBuffer())
+    const sha = createHash('sha256').update(buf).digest('hex')
+    const ext = (f.file_path.split('.').pop() || md.ext).replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || md.ext
+    const d = join(ARCHIVE_DIR, chatId, 'files', sha.slice(0, 2))
+    mkdirSync(d, { recursive: true, mode: 0o700 })
+    const p = join(d, `${sha}.${ext}`)
+    if (!existsSync(p)) writeFileSync(p, buf, { mode: 0o600 })
+    return { file_id: md.file_id, file_sha: sha, file_ext: ext, file_size: buf.length }
+  } catch (err) {
+    process.stderr.write(`telegram: archive file not downloaded: ${scrubToken(err)}\n`)
+    return { file_id: md.file_id, file: 'not downloaded' }
+  }
+}
+
+/** archive one message: its line, and its original file when it has one (fetched after, the line waits for it) */
+function archiveMessage(chatId: string, m: any, row: Record<string, unknown>): void {
+  if (!ARCHIVE_ON) return
+  const md = mediaOf(m)
+  if (!md) { archive(chatId, row); return }
+  void archiveFile(chatId, md).then(f => archive(chatId, { ...row, kind: md.kind, ...f }))
+}
+
 /** a group connected before the archive existed is told once, with its first message after the update */
 function announceArchive(chatId: string, lang: string): void {
   if (!ARCHIVE_ON || !chatId.startsWith('-')) return
@@ -1959,7 +2000,7 @@ function guestEvent(ctx: Context, text: string, access: Access, attachment?: Att
     appendFileSync(GUESTS_FILE, JSON.stringify(ev) + '\n', { mode: 0o600 })
     chmodSync(GUESTS_FILE, 0o600)
     announceArchive(String(ctx.chat!.id), langOf(STATE_DIR, ownersOf(access)[0] ?? ''))
-    archive(String(ctx.chat!.id), { msg: m.message_id ?? null, from: 'other', user_id: String(ctx.from!.id), kind: attachment?.kind ?? 'text',
+    archiveMessage(String(ctx.chat!.id), m, { msg: m.message_id ?? null, from: 'other', user_id: String(ctx.from!.id), kind: attachment?.kind ?? 'text',
                                     text: String(text).slice(0, 4096), ...(m.is_topic_message ? { thread: String(m.message_thread_id) } : {}) })
   } catch (err) {
     process.stderr.write(`telegram: guests journal not written: ${err}\n`)
@@ -2094,7 +2135,7 @@ async function handleInbound(
   })
   GUESTS_SINCE.delete(chat_id)
   announceArchive(chat_id, langOf(STATE_DIR, ownersOf(access)[0] ?? ''))
-  archive(chat_id, { msg: msgId ?? null, from: authorOf(access, chat_id, String(from.id)), user_id: String(from.id), kind: attachment?.kind ?? 'text',
+  archiveMessage(chat_id, ctx.message, { msg: msgId ?? null, from: authorOf(access, chat_id, String(from.id)), user_id: String(from.id), kind: attachment?.kind ?? 'text',
                      text, ...(attachment?.file_id ? { file_id: attachment.file_id } : {}),
                      ...((ctx.message as any)?.is_topic_message ? { thread: String((ctx.message as any).message_thread_id) } : {}) })
 
