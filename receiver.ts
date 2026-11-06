@@ -1805,8 +1805,14 @@ function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
 }
 
+// Strangers kept out of the session in groups: on by default and always in Mila Agent (the receiver's own journals).
+// TELEGRAM_SAFE_GROUPS=0 turns it off elsewhere — a Mila that serves customers in groups with no team list and no strangers'
+// lane: then everyone the group's policy lets in reaches the session, as before; the voice gate stays.
+const SAFE_GROUPS = !!JOURNAL_DIR || process.env.TELEGRAM_SAFE_GROUPS !== '0'
+
 /** A reply (by an owner or the team) to a stranger's message in a group: the session gets a placeholder, not the stranger's words. */
 function strangerQuoted(ctx: Context, access: Access, chatId: string): string | undefined {
+  if (!SAFE_GROUPS) return undefined
   const r: any = (ctx.message as any)?.reply_to_message
   if (!r || (ctx.chat?.type !== 'group' && ctx.chat?.type !== 'supergroup')) return undefined
   const own = r.from && !r.sender_chat && (r.from.id === ctx.me?.id || authorOf(access, chatId, String(r.from.id)) !== 'other')
@@ -2092,7 +2098,7 @@ async function handleInbound(
   // Safe by default: in a group, a stranger's text (anyone who is not an owner or on the group's team — bots, channels and
   // anonymous admins included) does not reach the main session with its tools. It goes to the guests' journal only; no typing,
   // no ack, no download. Answering strangers is the separate guest lane's job.
-  if ((ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup')
+  if (SAFE_GROUPS && (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup')
       && authorOf(access, String(ctx.chat.id), String(ctx.from!.id)) === 'other') {
     guestEvent(ctx, text, access, attachment)
     GUESTS_SINCE.set(String(ctx.chat.id), (GUESTS_SINCE.get(String(ctx.chat.id)) ?? 0) + 1)
