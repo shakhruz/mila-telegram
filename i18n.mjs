@@ -114,6 +114,12 @@ const W = {
     uz: 'Har qanday rejimda Mila chat arxivini yuritadi — barcha ishtirokchilar xabarlari; ulanganda guruhga bu aytiladi.',
     zh: '无论哪种模式，Mila 都会保存群聊记录（所有成员的消息）；连接时会告知群成员。',
   },
+  'archive.full': {
+    en: 'The archive of files is full: {mb} MB of {cap} MB, strangers\' files {other} MB. New files from groups are not kept — only that they were sent. Raise ARCHIVE_FILES_MB or free space.',
+    ru: 'Архив файлов полон: {mb} МБ из {cap} МБ, файлы чужих — {other} МБ. Новые файлы из групп не сохраняются — только отметка, что они были. Поднимите ARCHIVE_FILES_MB или освободите место.',
+    uz: 'Fayllar arxivi to‘ldi: {cap} MB dan {mb} MB, begonalar fayllari — {other} MB. Guruhlardan yangi fayllar saqlanmaydi — faqat yuborilgani belgilanadi. ARCHIVE_FILES_MB ni oshiring yoki joy bo‘shating.',
+    zh: '文件存档已满：{cap} MB 中已用 {mb} MB，其他人的文件 {other} MB。群组的新文件不再保存，只记录已发送。请提高 ARCHIVE_FILES_MB 或释放空间。',
+  },
   'join.rejected': { en: '❌ Rejected', ru: '❌ Отказано', uz: '❌ Rad etildi', zh: '❌ 已拒绝' },
   'join.decided':  { en: '⌛️ Already decided by another owner, or the request expired.', ru: '⌛️ Уже решено другим владельцем или запрос истёк.',
                      uz: '⌛️ Boshqa ega allaqachon hal qilgan yoki so‘rov muddati tugagan.', zh: '⌛️ 已由其他所有者处理，或请求已过期。' },

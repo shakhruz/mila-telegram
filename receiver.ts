@@ -1939,8 +1939,39 @@ function mediaOf(m: any): { kind: string, file_id: string, size?: number, ext: s
 }
 
 /** the original into the archive: archive/<chat>/files/<sha[:2]>/<sha256>.<ext>; over 20 MB (the Bot API limit) — metadata only */
-async function archiveFile(chatId: string, md: { kind: string, file_id: string, size?: number, ext: string }): Promise<Record<string, unknown>> {
+// A ceiling on the archive's files (ARCHIVE_FILES_MB, 2000 by default), strangers' files at most half of it: a group of thousands
+// cannot fill the volume and silence Mila. Over it — metadata only, and one line to the owner a day. The owner's private chat
+// is not counted against it.
+const FILES_CAP = Math.max(1, Number(process.env.ARCHIVE_FILES_MB || 2000)) * 1024 * 1024
+let fullToldDay = ''
+
+function usage(): { total: number, other: number } {
+  try { const u = JSON.parse(readFileSync(join(ARCHIVE_DIR, '.usage.json'), 'utf8')); return { total: Number(u.total) || 0, other: Number(u.other) || 0 } }
+  catch { return { total: 0, other: 0 } }
+}
+
+function roomFor(size: number, who: string, ownerDm: boolean): boolean {
+  if (ownerDm) return true
+  const u = usage()
+  if (u.total + size <= FILES_CAP && (who !== 'other' || u.other + size <= FILES_CAP / 2)) return true
+  const day = new Date().toISOString().slice(0, 10)
+  if (fullToldDay !== day) {
+    fullToldDay = day
+    const mb = (n: number) => String(Math.round(n / 1048576))
+    for (const o of ownersOf(loadAccess())) void bot.api.sendMessage(o, t(langOf(STATE_DIR, o), 'archive.full', { mb: mb(u.total), other: mb(u.other), cap: mb(FILES_CAP) })).catch(() => {})
+  }
+  return false
+}
+
+function count(size: number, who: string): void {
+  const u = usage(); u.total += size; if (who === 'other') u.other += size
+  try { writeFileSync(join(ARCHIVE_DIR, '.usage.json'), JSON.stringify(u), { mode: 0o600 }) } catch {}
+}
+
+async function archiveFile(chatId: string, md: { kind: string, file_id: string, size?: number, ext: string }, who = 'owner'): Promise<Record<string, unknown>> {
   if (md.size != null && md.size > 20 * 1024 * 1024) return { file_id: md.file_id, file: 'not downloaded: over 20 MB' }
+  const ownerDm = !chatId.startsWith('-')
+  if (!roomFor(md.size ?? 0, who, ownerDm)) return { file_id: md.file_id, file: 'not downloaded: the archive is full' }
   try {
     const f = await bot.api.getFile(md.file_id)
     if (!f.file_path) return { file_id: md.file_id, file: 'not downloaded' }
@@ -1948,12 +1979,13 @@ async function archiveFile(chatId: string, md: { kind: string, file_id: string, 
     const res = await fetch(`${API_ROOT}/file/bot${TOKEN}/${f.file_path}`, FETCH_OPT as any)
     if (!res.ok) return { file_id: md.file_id, file: 'not downloaded' }
     const buf = Buffer.from(await res.arrayBuffer())
+    if (!roomFor(buf.length, who, ownerDm)) return { file_id: md.file_id, file: 'not downloaded: the archive is full' }   // the real size
     const sha = createHash('sha256').update(buf).digest('hex')
     const ext = (f.file_path.split('.').pop() || md.ext).replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || md.ext
     const d = join(ARCHIVE_DIR, chatId, 'files', sha.slice(0, 2))
     mkdirSync(d, { recursive: true, mode: 0o700 })
     const p = join(d, `${sha}.${ext}`)
-    if (!existsSync(p)) writeFileSync(p, buf, { mode: 0o600 })
+    if (!existsSync(p)) { writeFileSync(p, buf, { mode: 0o600 }); if (!ownerDm) count(buf.length, who) }
     return { file_id: md.file_id, file_sha: sha, file_ext: ext, file_size: buf.length }
   } catch (err) {
     process.stderr.write(`telegram: archive file not downloaded: ${scrubToken(err)}\n`)
@@ -1966,7 +1998,7 @@ function archiveMessage(chatId: string, m: any, row: Record<string, unknown>): v
   if (!ARCHIVE_ON) return
   const md = mediaOf(m)
   if (!md) { archive(chatId, row); return }
-  void archiveFile(chatId, md).then(f => archive(chatId, { ...row, kind: md.kind, ...f }))
+  void archiveFile(chatId, md, String(row.from ?? 'other')).then(f => archive(chatId, { ...row, kind: md.kind, ...f }))
 }
 
 /** a group connected before the archive existed is told once, with its first message after the update */
