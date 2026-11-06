@@ -1562,8 +1562,10 @@ bot.on('callback_query:data', async ctx => {
       // Listen-only is a silent presence: the chat is not notified.
       if (mode !== 'read') {
         // the people in the group are told their messages are kept and who reads them (the archive), at connection
-        await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active') + (ARCHIVE_ON ? '\n' + t(langOf(STATE_DIR, aReq.requestedBy), 'join.archive') : '')).catch(() => {})
-        if (ARCHIVE_ON) try { mkdirSync(join(ARCHIVE_DIR, String(aReq.chatId)), { recursive: true, mode: 0o700 }); writeFileSync(join(ARCHIVE_DIR, String(aReq.chatId), '.announced'), String(Date.now()), { mode: 0o600 }) } catch {}
+        // an observer group is not told in the group (the owner's word): the owner's card says it; it is told if the mode changes later
+        const tellGroup = ARCHIVE_ON && mode !== 'observe' && mode !== 'read'
+        await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active') + (tellGroup ? '\n' + t(langOf(STATE_DIR, aReq.requestedBy), 'join.archive') : '')).catch(() => {})
+        if (tellGroup) try { mkdirSync(join(ARCHIVE_DIR, String(aReq.chatId)), { recursive: true, mode: 0o700 }); writeFileSync(join(ARCHIVE_DIR, String(aReq.chatId), '.announced'), String(Date.now()), { mode: 0o600 }) } catch {}
       }
     } else {
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
@@ -1929,6 +1931,8 @@ function archive(chatId: string, row: Record<string, unknown>): boolean {
 /** a group connected before the archive existed is told once, with its first message after the update */
 function announceArchive(chatId: string, lang: string): void {
   if (!ARCHIVE_ON || !chatId.startsWith('-')) return
+  const g: any = loadAccess().groups[chatId]
+  if (g?.observe || g?.readOnly) return   // an observer group: only the owner's card says it (the owner's word)
   const mark = join(ARCHIVE_DIR, chatId, '.announced')
   if (existsSync(mark)) return
   try { mkdirSync(join(ARCHIVE_DIR, chatId), { recursive: true, mode: 0o700 }); writeFileSync(mark, String(Date.now()), { mode: 0o600 }) } catch { return }

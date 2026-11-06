@@ -7,7 +7,7 @@ import { join } from 'path'
 
 const OWNER = 555 * 1000000 + 111, GROUP = -(100 * 1000000 + 4)
 
-test('the archive is told: in the owner\'s card and in the group on connection', async () => {
+async function connect(pick: number) {
   const dir = mkdtempSync(join(tmpdir(), 'jarc-')), sock = join(dir, 'api.sock'), io = join(dir, 'io')
   const sent: any[] = []; let step = 0
   const added = { update_id: 1, my_chat_member: { chat: { id: GROUP, type: 'group', title: 'Team' }, from: { id: OWNER, is_bot: false, first_name: 'O' }, date: 1,
@@ -22,7 +22,7 @@ test('the archive is told: in the owner\'s card and in the group on connection',
       const card = sent.find(b => String(b.chat_id) === String(OWNER) && b.reply_markup)
       if (step === 1 && card) {
         step = 2
-        const data = card.reply_markup.inline_keyboard[0][1].callback_data   // «By mention»
+        const data = card.reply_markup.inline_keyboard.flat()[pick].callback_data
         return Response.json({ ok: true, result: [{ update_id: 2, callback_query: { id: 'c', chat_instance: 'x', data, from: { id: OWNER, is_bot: false, first_name: 'O' },
           message: { message_id: 9, date: 1, chat: { id: OWNER, type: 'private' }, text: card.text } } }] })
       }
@@ -39,8 +39,17 @@ test('the archive is told: in the owner\'s card and in the group on connection',
            TELEGRAM_API_UNIX: sock, TELEGRAM_JOURNAL_DIR: io }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
   for (let i = 0; i < 100; i++) { await Bun.sleep(100); if (sent.some(b => String(b.chat_id) === String(GROUP))) break }
   await Bun.sleep(300); p.kill(); await p.exited; srv.stop(true); rmSync(dir, { recursive: true, force: true })
-  const card = sent.find(b => String(b.chat_id) === String(OWNER) && b.reply_markup)
+  return { card: sent.find(b => String(b.chat_id) === String(OWNER) && b.reply_markup), inGroup: sent.find(b => String(b.chat_id) === String(GROUP)) }
+}
+
+test('the archive is told: in the owner\'s card and in the group on connection', async () => {
+  const { card, inGroup } = await connect(1)   // «By mention»
   expect(card?.text).toMatch(/keeps an archive of the chat/)
-  const inGroup = sent.find(b => String(b.chat_id) === String(GROUP))
   expect(inGroup?.text).toMatch(/connected to this chat/); expect(inGroup?.text).toMatch(/keeps an archive of this chat; the owner can read it/)
+}, 30000)
+
+test('an observer group is not told in the group — only the owner\'s card says it', async () => {
+  const { card, inGroup } = await connect(2)   // «Observer»
+  expect(card?.text).toMatch(/keeps an archive of the chat/)
+  expect(inGroup?.text).toMatch(/connected to this chat/); expect(inGroup?.text).not.toMatch(/archive/)
 }, 30000)
