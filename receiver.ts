@@ -1900,6 +1900,27 @@ async function askTeam(ctx: Context, access: Access): Promise<void> {
   }
 }
 
+// ─── The archive (Mila Agent): every message from a connected chat, kept; a folder only the receiver reads (0700) ───
+// archive/<chat_id>/<YYYY-MM>.jsonl — one line per message, the author by id (owner / team / other), keys masked. The session
+// never reads it directly; what it may see comes later through a search that filters by author.
+const ARCHIVE_DIR = join(JOURNAL_DIR || STATE_DIR, 'archive')
+
+function archive(chatId: string, row: Record<string, unknown>): boolean {
+  if (!/^-?[0-9]{1,20}$/.test(chatId)) return false
+  try {
+    mkdirSync(ARCHIVE_DIR, { recursive: true, mode: 0o700 }); chmodSync(ARCHIVE_DIR, 0o700)
+    const d = join(ARCHIVE_DIR, chatId)
+    mkdirSync(d, { recursive: true, mode: 0o700 })
+    const f = join(d, new Date().toISOString().slice(0, 7) + '.jsonl')
+    const found: string[] = []
+    appendFileSync(f, JSON.stringify(maskSecrets({ ts: Date.now(), ...row }, found)) + '\n', { mode: 0o600 })
+    return true
+  } catch (err) {
+    process.stderr.write(`telegram: archive not written: ${err}\n`)
+    return false
+  }
+}
+
 function guestEvent(ctx: Context, text: string, access: Access, attachment?: AttachmentMeta): void {
   const found: string[] = []
   const m: any = ctx.message ?? {}
@@ -1919,6 +1940,8 @@ function guestEvent(ctx: Context, text: string, access: Access, attachment?: Att
     mkdirSync(dirname(GUESTS_FILE), { recursive: true, mode: DIR_MODE })
     appendFileSync(GUESTS_FILE, JSON.stringify(ev) + '\n', { mode: 0o600 })
     chmodSync(GUESTS_FILE, 0o600)
+    archive(String(ctx.chat!.id), { msg: m.message_id ?? null, from: 'other', user_id: String(ctx.from!.id), kind: attachment?.kind ?? 'text',
+                                    text: String(text).slice(0, 4096), ...(m.is_topic_message ? { thread: String(m.message_thread_id) } : {}) })
   } catch (err) {
     process.stderr.write(`telegram: guests journal not written: ${err}\n`)
   }
@@ -2051,6 +2074,9 @@ async function handleInbound(
     process.stderr.write(`telegram channel: failed to deliver inbound to Claude: ${err}\n`)
   })
   GUESTS_SINCE.delete(chat_id)
+  archive(chat_id, { msg: msgId ?? null, from: authorOf(access, chat_id, String(from.id)), user_id: String(from.id), kind: attachment?.kind ?? 'text',
+                     text, ...(attachment?.file_id ? { file_id: attachment.file_id } : {}),
+                     ...((ctx.message as any)?.is_topic_message ? { thread: String((ctx.message as any).message_thread_id) } : {}) })
 
   // Ack reaction — lets the user know we're processing. Fire-and-forget.
   // Telegram only accepts a fixed emoji whitelist — if the user configures
@@ -2107,6 +2133,17 @@ function botIsMember(status: string | undefined, isMember?: boolean): boolean {
 // exactly which message resonated. Group reactions are intentionally ignored
 // (noise). This closes an asymmetry: the bot could always SEND reactions
 // (react tool), but never saw the user's own.
+// An edit of a message from a connected chat: archived as its own line (the earlier text stays); the session is not told.
+bot.on('edited_message', ctx => {
+  const m: any = ctx.editedMessage, chatId = String(m?.chat?.id ?? ''), uid = String(m?.from?.id ?? '')
+  if (!m || !chatId || !uid) return
+  const access = loadAccess()
+  const connected = m.chat.type === 'private' ? access.allowFrom.includes(uid) : Boolean(access.groups[chatId])
+  if (!connected) return
+  archive(chatId, { msg: m.message_id, edit: true, from: m.chat.type === 'private' ? (isOwner(access, uid) ? 'owner' : 'other') : authorOf(access, chatId, uid),
+                    user_id: uid, kind: 'edit', text: String(m.text ?? m.caption ?? '').slice(0, 4096) })
+})
+
 bot.on('message_reaction', async ctx => {
   try {
     const upd = ctx.messageReaction
@@ -2272,7 +2309,7 @@ void (async () => {
       await bot.start({
         // message_reaction is excluded from Telegram's defaults — ask for it
         // explicitly; the rest is what the handlers above actually consume.
-        allowed_updates: ['message', 'callback_query', 'my_chat_member', 'message_reaction'],
+        allowed_updates: ['message', 'edited_message', 'callback_query', 'my_chat_member', 'message_reaction'],
         onStart: info => {
           attempt = 0
           botUsername = info.username
