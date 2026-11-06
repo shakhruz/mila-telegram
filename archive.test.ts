@@ -53,3 +53,32 @@ test('archive: per chat and month, 0700/0600, author by id, edits, nothing from 
   expect(told.length).toBe(1)
   rmSync(dir, { recursive: true, force: true })
 }, 30000)
+
+test('a plain install (no receiver folder, no TELEGRAM_ARCHIVE): no archive, no announcement in the groups', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'arch-plain-')), sock = join(dir, 'api.sock')
+  const sent: string[] = []; let served = false
+  const srv = Bun.serve({ unix: sock, async fetch(req) {
+    const method = new URL(req.url).pathname.split('/').pop()!
+    if (method === 'sendMessage') { const b = await req.json().catch(() => ({})); sent.push(String(b.text ?? '')); return Response.json({ ok: true, result: { message_id: 1, date: 1, chat: { id: b.chat_id, type: 'supergroup' } } }) }
+    if (method === 'getMe') return Response.json({ ok: true, result: { id: 777, is_bot: true, first_name: 'M', username: 'm_bot' } })
+    if (method === 'getUpdates') {
+      if (served) { await Bun.sleep(300); return Response.json({ ok: true, result: [] }) }
+      served = true
+      return Response.json({ ok: true, result: [{ update_id: 1, message: { message_id: 1, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: OWNER, is_bot: false, first_name: 'O' }, text: 'owner in group' } }] })
+    }
+    return Response.json({ ok: true, result: true })
+  } })
+  writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [String(OWNER)], pending: {}, groups: { [String(GROUP)]: { requireMention: false, allowFrom: [] } } }))
+  const base: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('TELEGRAM_')) base[k] = v
+  const p = Bun.spawn(['bun', join(import.meta.dir, 'receiver.ts')], {
+    env: { ...base, RECEIVER_DAEMON: '1', TELEGRAM_STATE_DIR: dir, TELEGRAM_BOT_TOKEN: '1234' + '5678:' + 'x'.repeat(35), TELEGRAM_API_ROOT: 'http://keeper/telegram',
+           TELEGRAM_API_UNIX: sock }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  const ev = join(dir, 'inbound', 'events.jsonl')
+  for (let i = 0; i < 60; i++) { await Bun.sleep(100); if (existsSync(ev) && readFileSync(ev, 'utf8').includes('owner in group')) break }
+  await Bun.sleep(400); p.kill(); await p.exited; srv.stop(true)
+  expect(readFileSync(ev, 'utf8')).toContain('owner in group')            // the message itself went through as before
+  expect(existsSync(join(dir, 'archive'))).toBe(false)
+  expect(sent.filter(t => /archive/.test(t)).length).toBe(0)
+  rmSync(dir, { recursive: true, force: true })
+}, 30000)

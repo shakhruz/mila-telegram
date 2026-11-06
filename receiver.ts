@@ -1198,7 +1198,7 @@ bot.command('channel_join', async ctx => {
       try {
         await bot.api.sendMessage(
           owner,
-          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: joins[code].requestedByName }) + '\n\n' + t(langOf(STATE_DIR, owner), 'join.archiveOwner'),
+          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: joins[code].requestedByName }) + (ARCHIVE_ON ? '\n\n' + t(langOf(STATE_DIR, owner), 'join.archiveOwner') : ''),
           { reply_markup: kb(langOf(STATE_DIR, owner)) },
         )
         delivered++
@@ -1562,8 +1562,8 @@ bot.on('callback_query:data', async ctx => {
       // Listen-only is a silent presence: the chat is not notified.
       if (mode !== 'read') {
         // the people in the group are told their messages are kept and who reads them (the archive), at connection
-        await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active') + '\n' + t(langOf(STATE_DIR, aReq.requestedBy), 'join.archive')).catch(() => {})
-        try { mkdirSync(join(ARCHIVE_DIR, String(aReq.chatId)), { recursive: true, mode: 0o700 }); writeFileSync(join(ARCHIVE_DIR, String(aReq.chatId), '.announced'), String(Date.now()), { mode: 0o600 }) } catch {}
+        await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active') + (ARCHIVE_ON ? '\n' + t(langOf(STATE_DIR, aReq.requestedBy), 'join.archive') : '')).catch(() => {})
+        if (ARCHIVE_ON) try { mkdirSync(join(ARCHIVE_DIR, String(aReq.chatId)), { recursive: true, mode: 0o700 }); writeFileSync(join(ARCHIVE_DIR, String(aReq.chatId), '.announced'), String(Date.now()), { mode: 0o600 }) } catch {}
       }
     } else {
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
@@ -1906,9 +1906,12 @@ async function askTeam(ctx: Context, access: Access): Promise<void> {
 // archive/<chat_id>/<YYYY-MM>.jsonl — one line per message, the author by id (owner / team / other), keys masked. The session
 // never reads it directly; what it may see comes later through a search that filters by author.
 const ARCHIVE_DIR = join(JOURNAL_DIR || STATE_DIR, 'archive')
+// Only in Mila Agent (the receiver's own folder, TELEGRAM_JOURNAL_DIR) or on an explicit TELEGRAM_ARCHIVE=1. A plain install of the
+// plugin keeps no archive and never announces one in the owner's groups on its own.
+const ARCHIVE_ON = Boolean(JOURNAL_DIR) || process.env.TELEGRAM_ARCHIVE === '1'
 
 function archive(chatId: string, row: Record<string, unknown>): boolean {
-  if (!/^-?[0-9]{1,20}$/.test(chatId)) return false
+  if (!ARCHIVE_ON || !/^-?[0-9]{1,20}$/.test(chatId)) return false
   try {
     mkdirSync(ARCHIVE_DIR, { recursive: true, mode: 0o700 }); chmodSync(ARCHIVE_DIR, 0o700)
     const d = join(ARCHIVE_DIR, chatId)
@@ -1925,7 +1928,7 @@ function archive(chatId: string, row: Record<string, unknown>): boolean {
 
 /** a group connected before the archive existed is told once, with its first message after the update */
 function announceArchive(chatId: string, lang: string): void {
-  if (!chatId.startsWith('-')) return
+  if (!ARCHIVE_ON || !chatId.startsWith('-')) return
   const mark = join(ARCHIVE_DIR, chatId, '.announced')
   if (existsSync(mark)) return
   try { mkdirSync(join(ARCHIVE_DIR, chatId), { recursive: true, mode: 0o700 }); writeFileSync(mark, String(Date.now()), { mode: 0o600 }) } catch { return }
@@ -2297,7 +2300,7 @@ async function onMyChatMember(ctx: any, deferred = false): Promise<void> {
       try {
         await bot.api.sendMessage(
           owner,
-          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: actorName }) + '\n\n' + t(langOf(STATE_DIR, owner), 'join.archiveOwner'),
+          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: actorName }) + (ARCHIVE_ON ? '\n\n' + t(langOf(STATE_DIR, owner), 'join.archiveOwner') : ''),
           { reply_markup: kb(langOf(STATE_DIR, owner)) },
         )
         delivered++
