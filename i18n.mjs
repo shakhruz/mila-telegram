@@ -102,6 +102,18 @@ const W = {
                      uz: 'Ochiq so‘rovlar juda ko‘p — shaxsiy chatda ularni hal qiling va qayta urinib ko‘ring.', zh: '待处理请求过多 — 请在私信中处理后重试。' },
   'join.active':   { en: '🟢 Mila is connected to this chat.', ru: '🟢 Мила подключена к этому чату.', uz: '🟢 Mila ushbu chatga ulandi.', zh: '🟢 Mila 已连接到此聊天。' },
   'join.connected': { en: '✅ Connected: {mode}', ru: '✅ Подключено: {mode}', uz: '✅ Ulandi: {mode}', zh: '✅ 已连接：{mode}' },
+  'join.archive': {
+    en: 'Mila keeps an archive of this chat; the owner can read it. To have your messages removed, ask the owner.',
+    ru: 'Мила ведёт архив переписки этого чата; владелец может его читать. Удалить свои сообщения — по просьбе через владельца.',
+    uz: 'Mila bu chat yozishmalari arxivini yuritadi; egasi uni o‘qishi mumkin. Xabarlaringizni o‘chirish — egasi orqali so‘rov bilan.',
+    zh: 'Mila 会保存本群聊天记录，群主可以查看。如需删除你的消息，请联系群主。',
+  },
+  'join.archiveOwner': {
+    en: 'In every mode Mila keeps an archive of the chat — everyone\'s messages, the group is told so when it is connected.',
+    ru: 'В любом режиме Мила ведёт архив чата — сообщения всех участников; группе об этом скажут при подключении.',
+    uz: 'Har qanday rejimda Mila chat arxivini yuritadi — barcha ishtirokchilar xabarlari; ulanganda guruhga bu aytiladi.',
+    zh: '无论哪种模式，Mila 都会保存群聊记录（所有成员的消息）；连接时会告知群成员。',
+  },
   'join.rejected': { en: '❌ Rejected', ru: '❌ Отказано', uz: '❌ Rad etildi', zh: '❌ 已拒绝' },
   'join.decided':  { en: '⌛️ Already decided by another owner, or the request expired.', ru: '⌛️ Уже решено другим владельцем или запрос истёк.',
                      uz: '⌛️ Boshqa ega allaqachon hal qilgan yoki so‘rov muddati tugagan.', zh: '⌛️ 已由其他所有者处理，或请求已过期。' },

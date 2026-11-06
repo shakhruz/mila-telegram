@@ -1198,7 +1198,7 @@ bot.command('channel_join', async ctx => {
       try {
         await bot.api.sendMessage(
           owner,
-          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: joins[code].requestedByName }),
+          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: joins[code].requestedByName }) + '\n\n' + t(langOf(STATE_DIR, owner), 'join.archiveOwner'),
           { reply_markup: kb(langOf(STATE_DIR, owner)) },
         )
         delivered++
@@ -1561,7 +1561,8 @@ bot.on('callback_query:data', async ctx => {
       await tellOthers(o => t(langOf(STATE_DIR, o), 'join.tellOthers', { who: aWho, title: aReq.title || t(langOf(STATE_DIR, o), 'join.untitled'), mode: t(langOf(STATE_DIR, o), 'mode.' + mode) }))
       // Listen-only is a silent presence: the chat is not notified.
       if (mode !== 'read') {
-        await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active')).catch(() => {})
+        // the people in the group are told their messages are kept and who reads them (the archive), at connection
+        await bot.api.sendMessage(aReq.chatId, t(langOf(STATE_DIR, aReq.requestedBy), 'join.active') + '\n' + t(langOf(STATE_DIR, aReq.requestedBy), 'join.archive')).catch(() => {})
       }
     } else {
       logAuth({ chat_id: aReq.chatId, title: aReq.title, requested_by: aReq.requestedByName,
@@ -2284,7 +2285,7 @@ async function onMyChatMember(ctx: any, deferred = false): Promise<void> {
       try {
         await bot.api.sendMessage(
           owner,
-          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: actorName }),
+          t(langOf(STATE_DIR, owner), 'join.card', { title: title || t(langOf(STATE_DIR, owner), 'join.untitled'), who: actorName }) + '\n\n' + t(langOf(STATE_DIR, owner), 'join.archiveOwner'),
           { reply_markup: kb(langOf(STATE_DIR, owner)) },
         )
         delivered++
