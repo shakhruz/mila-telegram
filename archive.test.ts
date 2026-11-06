@@ -82,3 +82,32 @@ test('a plain install (no receiver folder, no TELEGRAM_ARCHIVE): no archive, no 
   expect(sent.filter(t => /archive/.test(t)).length).toBe(0)
   rmSync(dir, { recursive: true, force: true })
 }, 30000)
+
+test('an observer group (not told about the archive): a stranger is kept as metadata only — no words, no file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'arch-obs-')), sock = join(dir, 'api.sock'), io = join(dir, 'io')
+  let served = false
+  const srv = Bun.serve({ unix: sock, async fetch(req) {
+    const method = new URL(req.url).pathname.split('/').pop()!
+    if (method === 'getMe') return Response.json({ ok: true, result: { id: 777, is_bot: true, first_name: 'M', username: 'm_bot' } })
+    if (method === 'getUpdates') {
+      if (served) { await Bun.sleep(300); return Response.json({ ok: true, result: [] }) }
+      served = true
+      return Response.json({ ok: true, result: [{ update_id: 1, message: { message_id: 1, date: 1, chat: { id: GROUP, type: 'supergroup', title: 'G' }, from: { id: OTHER, is_bot: false, first_name: 'S' }, text: 'private words' } }] })
+    }
+    return Response.json({ ok: true, result: true })
+  } })
+  mkdirSync(io); writeFileSync(join(io, 'owners.json'), JSON.stringify({ owners: [String(OWNER)] }))
+  writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [String(OWNER)], pending: {}, groups: { [String(GROUP)]: { requireMention: false, allowFrom: [], observe: true } } }))
+  const base: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('TELEGRAM_')) base[k] = v
+  const p = Bun.spawn(['bun', join(import.meta.dir, 'receiver.ts')], {
+    env: { ...base, RECEIVER_DAEMON: '1', TELEGRAM_STATE_DIR: dir, TELEGRAM_BOT_TOKEN: '1234' + '5678:' + 'x'.repeat(35), TELEGRAM_API_ROOT: 'http://keeper/telegram',
+           TELEGRAM_API_UNIX: sock, TELEGRAM_JOURNAL_DIR: io }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  const f = join(io, 'archive', String(GROUP), new Date().toISOString().slice(0, 7) + '.jsonl')
+  for (let i = 0; i < 60; i++) { await Bun.sleep(100); if (existsSync(f)) break }
+  await Bun.sleep(300); p.kill(); await p.exited; srv.stop(true)
+  const line = JSON.parse(readFileSync(f, 'utf8').trim().split('\n')[0])
+  expect(line).toMatchObject({ from: 'other', untold: true }); expect(line.text).toBeUndefined()
+  expect(readFileSync(f, 'utf8')).not.toContain('private words')
+  rmSync(dir, { recursive: true, force: true })
+}, 30000)

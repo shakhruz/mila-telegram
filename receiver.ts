@@ -2032,7 +2032,12 @@ function guestEvent(ctx: Context, text: string, access: Access, attachment?: Att
     appendFileSync(GUESTS_FILE, JSON.stringify(ev) + '\n', { mode: 0o600 })
     chmodSync(GUESTS_FILE, 0o600)
     announceArchive(String(ctx.chat!.id), langOf(STATE_DIR, ownersOf(access)[0] ?? ''))
-    archiveMessage(String(ctx.chat!.id), m, { msg: m.message_id ?? null, from: 'other', user_id: String(ctx.from!.id), kind: attachment?.kind ?? 'text',
+    // an observer group is not told about the archive (the owner's word) — so a stranger there is kept as metadata only:
+    // who and when, no words, no file
+    const og: any = access.groups[String(ctx.chat!.id)]
+    if (og?.observe || og?.readOnly) archive(String(ctx.chat!.id), { msg: m.message_id ?? null, from: 'other', user_id: String(ctx.from!.id),
+                                                                    kind: attachment?.kind ?? 'text', untold: true })
+    else archiveMessage(String(ctx.chat!.id), m, { msg: m.message_id ?? null, from: 'other', user_id: String(ctx.from!.id), kind: attachment?.kind ?? 'text',
                                     text: String(text).slice(0, 4096), ...(m.is_topic_message ? { thread: String(m.message_thread_id) } : {}) })
   } catch (err) {
     process.stderr.write(`telegram: guests journal not written: ${err}\n`)
