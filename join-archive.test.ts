@@ -37,8 +37,10 @@ async function connect(pick: number) {
   const p = Bun.spawn(['bun', join(import.meta.dir, 'receiver.ts')], {
     env: { ...base, RECEIVER_DAEMON: '1', TELEGRAM_STATE_DIR: dir, TELEGRAM_BOT_TOKEN: '1234' + '5678:' + 'x'.repeat(35), TELEGRAM_API_ROOT: 'http://keeper/telegram',
            TELEGRAM_API_UNIX: sock, TELEGRAM_JOURNAL_DIR: io }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
-  for (let i = 0; i < 100; i++) { await Bun.sleep(100); if (sent.some(b => String(b.chat_id) === String(GROUP))) break }
-  await Bun.sleep(300); p.kill(); await p.exited; srv.stop(true); rmSync(dir, { recursive: true, force: true })
+  try {   // the daemon dies with the test even when it fails or is cut short
+    for (let i = 0; i < 100; i++) { await Bun.sleep(100); if (sent.some(b => String(b.chat_id) === String(GROUP))) break }
+    await Bun.sleep(300)
+  } finally { p.kill(); await p.exited; srv.stop(true); rmSync(dir, { recursive: true, force: true }) }
   return { card: sent.find(b => String(b.chat_id) === String(OWNER) && b.reply_markup), inGroup: sent.find(b => String(b.chat_id) === String(GROUP)) }
 }
 
